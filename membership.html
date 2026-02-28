@@ -148,13 +148,20 @@ let S={
 function esc(s){return String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');}
 function fmtDate(d){if(!d)return'—';if(d instanceof Date){const m=d.getMonth()+1,dy=d.getDate(),y=d.getFullYear();return m+'/'+dy+'/'+y;}const s=String(d);if(s.includes('-')){const p=s.split('T')[0].split('-');return parseInt(p[1])+'/'+parseInt(p[2])+'/'+p[0];}return s;}
 function fmtPhone(p){if(!p)return'';const s=String(p).replace(/[^0-9]/g,'').replace(/\.0$/,'');if(s.length===10)return'('+s.slice(0,3)+') '+s.slice(3,6)+'-'+s.slice(6);return s;}
-function parseDate(v){if(!v)return null;if(v instanceof Date)return v;const s=String(v);if(s.includes('-')){const d=new Date(s);return isNaN(d)?null:d;}return null;}
+function parseDate(v){if(!v)return null;if(v instanceof Date)return v;const s=String(v).trim();if(!s||s==='—'||s==='-')return null;
+  // ISO format: 2025-12-31 or 2025-12-31T00:00:00
+  if(s.match(/^\d{4}-\d{1,2}-\d{1,2}/)){const d=new Date(s.split('T')[0]+'T12:00:00');return isNaN(d)?null:d;}
+  // US format: 12/31/2025 or 1/1/2025
+  if(s.match(/^\d{1,2}\/\d{1,2}\/\d{2,4}/)){const p=s.split('/');const d=new Date(parseInt(p[2]),parseInt(p[0])-1,parseInt(p[1]));return isNaN(d)?null:d;}
+  // Excel serial number (days since 1/1/1900)
+  const n=parseFloat(s);if(!isNaN(n)&&n>30000&&n<60000){const d=new Date((n-25569)*86400000);return isNaN(d)?null:d;}
+  return null;}
 function daysBetween(a,b){return Math.round((b-a)/(1000*60*60*24));}
 
 function parseMemberData(wb){
   const members=[];
   const shName=wb.SheetNames.find(n=>n.toLowerCase().includes('membership'))||wb.SheetNames[0];
-  const raw=XLSX.utils.sheet_to_json(wb.Sheets[shName],{defval:null,raw:false});
+  const raw=XLSX.utils.sheet_to_json(wb.Sheets[shName],{defval:null});
   for(const row of raw){
     const lk={};for(const k of Object.keys(row))lk[k.toLowerCase().trim()]=row[k];
     const first=(lk.first||'').toString().trim();
@@ -165,7 +172,8 @@ function parseMemberData(wb){
     const status=(lk.status||'Lapsed').toString().trim();
     const duration=parseInt(lk.duration)||1;
     const renewalDate=parseDate(lk['renewal date']);
-    const expDate=parseDate(lk['expiration date']);
+    const rawExp=lk['expiration date'];
+    const expDate=parseDate(rawExp);
     const email=(lk.recipient||lk.email||'').toString().trim();
     const phone=(lk['phone number']||'').toString().replace(/\.0$/,'').trim();
     const address=(lk.address||'').toString().trim();
@@ -203,6 +211,8 @@ function parseMemberData(wb){
       daysToExp,expiring
     });
   }
+  console.log('Parsed',members.length,'members.',members.filter(m=>m.expDate).length,'have exp dates.',
+    'Sample exp:',members.slice(0,3).map(m=>({name:m.fullName,rawExp:m.expDate,fmt:fmtDate(m.expDate)})));
   return members.sort((a,b)=>a.last.localeCompare(b.last)||a.first.localeCompare(b.first));
 }
 
@@ -269,8 +279,12 @@ function renderTabs(){
     tabs.push({id:'cards',l:'🪪 Cards'});
     tabs.push({id:'settings',l:'⚙️ Settings'});
   }
-  document.getElementById('tabs').innerHTML=tabs.map(t=>'<button class="tab'+(S.view===t.id?' active':'')+'" data-view="'+t.id+'">'+t.l+'</button>').join('');
-  document.querySelectorAll('.tab').forEach(b=>b.addEventListener('click',()=>showView(b.dataset.view)));
+  let tabHtml=tabs.map(t=>'<button class="tab'+(S.view===t.id?' active':'')+'" data-view="'+t.id+'">'+t.l+'</button>').join('');
+  if(!S.adminUnlocked)tabHtml+='<button class="tab" id="admin-unlock-btn" style="margin-left:auto;color:var(--muted)">🔒 Admin</button>';
+  document.getElementById('tabs').innerHTML=tabHtml;
+  document.querySelectorAll('.tab').forEach(b=>{if(b.dataset.view)b.addEventListener('click',()=>showView(b.dataset.view));});
+  const unlockBtn=document.getElementById('admin-unlock-btn');
+  if(unlockBtn)unlockBtn.addEventListener('click',()=>{S.pendingView='dashboard';document.getElementById('pwd-gate').classList.remove('hidden');document.getElementById('pwd-input').focus();});
 }
 
 function showView(id){
