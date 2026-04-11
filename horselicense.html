@@ -139,10 +139,30 @@ function sentBadge(h){
   return "<span class='badge badge-none'>—</span>";
 }
 
+function ownerBadge(h){
+  if(h.ownerFound === false)
+    return " <span class='badge' style='background:rgba(231,76,60,.15);color:var(--red)' title='Owner name not found in membership sheet'>&#9888; No match</span>";
+  if(h.ownerCownNum)
+    return " <span class='badge badge-year'>#"+esc(h.ownerCownNum)+"</span>";
+  return "";
+}
+
 // ===== PARSE DATA =====
-function parseHorseData(wb){
+// Called when proxy returns JSON (merged server-side by Apps Script)
+function parseHorseJSON(data){
+  var raw = data.horses || [];
+  console.log("Received " + raw.length + " horse licenses from proxy. Member index size: " + (data.memberCount || "?"));
+  // The proxy already did the merge — just normalise sentStatus client-side
+  // in case the sheet value changed since the proxy built the object
+  raw.forEach(function(h){
+    h.sentStatus = parseSentStatus(h.sentRaw || h.sentStatus || "");
+  });
+  return raw.sort(function(a,b){ return a.owner.localeCompare(b.owner) || a.horse.localeCompare(b.horse); });
+}
+
+// Called when user manually uploads an xlsx file (fallback path — no member merge)
+function parseHorseXLSX(wb){
   var horses = [];
-  // Try to find the horse license sheet by name, fall back to first sheet
   var shName = wb.SheetNames.find(function(n){
     return n.toLowerCase().indexOf("horse") > -1 || n.toLowerCase().indexOf("license") > -1;
   }) || wb.SheetNames[0];
@@ -152,42 +172,33 @@ function parseHorseData(wb){
 
   for(var i = 0; i < raw.length; i++){
     var row = raw[i];
-    // Build case-insensitive lookup
     var lk = {};
     Object.keys(row).forEach(function(k){ lk[k.toLowerCase().trim()] = row[k]; });
 
-    var horse   = String(lk["horse"] || lk["horse name"] || "").trim();
-    var owner   = String(lk["owner"] || lk["owner name"] || "").trim();
-    var cownNum = String(lk["cown number"] || lk["cown #"] || lk["cown#"] || lk["member #"] || lk["number"] || "").trim();
-    var rider   = String(lk["rider"] || lk["rider name"] || "").trim();
-    var year    = parseInt(lk["year"] || lk["license year"] || lk["yr"] || 0) || currentYear();
-
+    var horse = String(lk["horse"] || lk["horse name"] || "").trim();
+    var owner = String(lk["owner"] || lk["owner name"] || "").trim();
     if(!horse && !owner) continue;
 
     var rawSent = String(lk["sent"] || "").trim();
-    var sentStatus = parseSentStatus(rawSent);
-
-    // Additional optional fields
-    var email   = String(lk["email"] || lk["recipient"] || "").trim();
-    var phone   = String(lk["phone"] || lk["phone number"] || "").trim();
-    var address = String(lk["address"] || "").trim();
-    var city    = String(lk["city"] || "").trim();
-    var state   = String(lk["state"] || "").trim();
-    var zip     = String(lk["zip"] || lk["zip code"] || "").trim();
-    var licNum  = String(lk["license #"] || lk["license number"] || lk["lic #"] || "").trim();
-
     horses.push({
-      horse: horse, owner: owner, cownNum: cownNum,
-      rider: rider, year: year,
-      email: email, phone: phone,
-      address: address, city: city, state: state, zip: zip,
-      licNum: licNum,
-      sentStatus: sentStatus, sentRaw: rawSent,
-      rowIndex: i
+      horse:        horse,
+      owner:        owner,
+      horseNum:     String(lk["cown horse number"] || lk["horse number"] || lk["horse #"] || lk["cown horse #"] || "").trim(),
+      ownerCownNum: String(lk["cown #"] || lk["cown number"] || "").trim(),
+      ownerEmail:   String(lk["email"] || lk["recipient"] || "").trim(),
+      rider:        String(lk["rider"] || lk["rider name"] || "").trim(),
+      riderCownNum: "",
+      riderEmail:   "",
+      year:         parseInt(lk["year"] || lk["license year"] || lk["yr"] || 0) || currentYear(),
+      licNum:       String(lk["license #"] || lk["license number"] || lk["lic #"] || "").trim(),
+      sentStatus:   parseSentStatus(rawSent),
+      sentRaw:      rawSent,
+      rowIndex:     i,
+      ownerFound:   true,
+      riderFound:   true
     });
   }
-
-  console.log("Parsed " + horses.length + " horse licenses");
+  console.log("Parsed " + horses.length + " horse licenses from file (no member merge)");
   return horses.sort(function(a,b){ return a.owner.localeCompare(b.owner) || a.horse.localeCompare(b.horse); });
 }
 
@@ -266,8 +277,8 @@ function renderLookup(){
     if(!matches.length){ res.innerHTML = "<p class='empty'>No licenses found</p>"; return; }
     var t = "<table><thead><tr><th>Horse</th><th>Owner</th><th>CoWN #</th><th>Rider</th><th>Year</th><th></th></tr></thead><tbody>";
     matches.slice(0, 25).forEach(function(h){
-      t += "<tr><td class='bold'>"+esc(h.horse)+"</td><td>"+esc(h.owner)+"</td>"
-         +"<td class='ctr'>"+esc(h.cownNum)+"</td><td>"+esc(h.rider)+"</td>"
+      t += "<tr><td class='bold'>"+esc(h.horse)+"</td><td>"+esc(h.owner)+ownerBadge(h)+"</td>"
+         +"<td class='ctr'>"+esc(h.ownerCownNum||"—")+"</td><td>"+esc(h.rider)+"</td>"
          +"<td class='ctr'><span class='badge badge-year'>"+h.year+"</span></td>"
          +"<td><button class='btn btn-accent btn-sm view-lic-btn' data-idx='"+h.rowIndex+"'>View License</button></td></tr>";
     });
@@ -324,8 +335,8 @@ function renderDashboard(){
     var t = "<div style='overflow-x:auto'><table><thead><tr><th>Horse</th><th>Owner</th><th>CoWN #</th><th>Rider</th><th>Year</th><th>License Status</th></tr></thead><tbody>";
     list.slice(0, 100).forEach(function(h){
       t += "<tr class='dash-row' data-idx='"+h.rowIndex+"' style='cursor:pointer'>"
-         +"<td class='bold'>"+esc(h.horse)+"</td><td>"+esc(h.owner)+"</td>"
-         +"<td class='ctr'>"+esc(h.cownNum)+"</td><td>"+esc(h.rider)+"</td>"
+         +"<td class='bold'>"+esc(h.horse)+"</td><td>"+esc(h.owner)+ownerBadge(h)+"</td>"
+         +"<td class='ctr'>"+esc(h.ownerCownNum||"—")+"</td><td>"+esc(h.rider)+"</td>"
          +"<td class='ctr'><span class='badge badge-year'>"+h.year+"</span></td>"
          +"<td class='ctr'>"+sentBadge(h)+"</td></tr>";
     });
@@ -389,12 +400,13 @@ function renderLicenses(){
     if(!list.length){ res.innerHTML = "<p class='empty'>No licenses match</p>"; return; }
     var t = "<div style='overflow-x:auto'><table><thead><tr><th>Horse</th><th>Owner</th><th>CoWN #</th><th>Rider</th><th>Year</th><th>Status</th><th></th></tr></thead><tbody>";
     list.slice(0, 60).forEach(function(h){
-      t += "<tr><td class='bold'>"+esc(h.horse)+"</td><td>"+esc(h.owner)+"</td>"
-         +"<td class='ctr'>"+esc(h.cownNum)+"</td><td>"+esc(h.rider)+"</td>"
+      t += "<tr><td class='bold'>"+esc(h.horse)+"</td><td>"+esc(h.owner)+ownerBadge(h)+"</td>"
+         +"<td class='ctr'>"+esc(h.ownerCownNum||"—")+"</td><td>"+esc(h.rider)+"</td>"
          +"<td class='ctr'><span class='badge badge-year'>"+h.year+"</span></td>"
          +"<td class='ctr'>"+sentBadge(h)+"</td>"
          +"<td><button class='btn btn-dark btn-sm view-lic-btn' data-idx='"+h.rowIndex+"'>View</button>"
-         +(h.email ? " <button class='btn btn-green btn-sm send-lic-btn' data-idx='"+h.rowIndex+"'>&#9993; Send</button>" : "")
+         +(h.ownerEmail ? " <button class='btn btn-green btn-sm send-lic-btn' data-idx='"+h.rowIndex+"'>&#9993; Send</button>"
+                        : " <span style='font-size:.7rem;color:var(--red)'>No email</span>")
          +"</td></tr>";
     });
     t += "</tbody></table></div>";
@@ -522,7 +534,7 @@ function renderSettings(){
     var reader = new FileReader();
     reader.onload = function(ev){
       var wb = XLSX.read(new Uint8Array(ev.target.result), { type:"array" });
-      S.horses = parseHorseData(wb);
+      S.horses = parseHorseXLSX(wb);
       showView("dashboard");
     };
     reader.readAsArrayBuffer(file);
@@ -567,13 +579,17 @@ function buildLicenseHTML(h){
     +"<div style='font-weight:700;font-size:1rem;color:#D4A04A'>"+h.year+"</div></div>"
 
     +"<div><div style='font-size:.7rem;color:#999;text-transform:uppercase;letter-spacing:.05em'>Owner</div>"
-    +"<div style='font-weight:600;color:#1a1a2e'>"+esc(h.owner)+"</div></div>"
+    +"<div style='font-weight:600;color:#1a1a2e'>"+esc(h.owner)
+    +(h.ownerCownNum ? "<span style='font-size:.75rem;color:#aaa;margin-left:6px'>CoWN #"+esc(h.ownerCownNum)+"</span>" : "")
+    +"</div></div>"
 
-    +"<div><div style='font-size:.7rem;color:#999;text-transform:uppercase;letter-spacing:.05em'>CoWN #</div>"
-    +"<div style='font-weight:600;color:#1a1a2e'>"+esc(h.cownNum)+"</div></div>"
+    +"<div><div style='font-size:.7rem;color:#999;text-transform:uppercase;letter-spacing:.05em'>Horse #</div>"
+    +"<div style='font-weight:600;color:#1a1a2e'>"+(h.horseNum||"—")+"</div></div>"
 
     +(h.rider ? "<div style='grid-column:1/-1'><div style='font-size:.7rem;color:#999;text-transform:uppercase;letter-spacing:.05em'>Rider</div>"
-    +"<div style='font-weight:600;color:#1a1a2e'>"+esc(h.rider)+"</div></div>" : "")
+    +"<div style='font-weight:600;color:#1a1a2e'>"+esc(h.rider)
+    +(h.riderCownNum ? "<span style='font-size:.75rem;color:#aaa;margin-left:6px'>CoWN #"+esc(h.riderCownNum)+"</span>" : "")
+    +"</div></div>" : "")
 
     +(h.licNum ? "<div style='grid-column:1/-1'><div style='font-size:.7rem;color:#999;text-transform:uppercase;letter-spacing:.05em'>License #</div>"
     +"<div style='font-weight:600;color:#1a1a2e;font-family:monospace'>"+esc(h.licNum)+"</div></div>" : "")
@@ -595,10 +611,10 @@ function showLicenseModal(h){
   html += "<div class='btn-row' style='margin-top:1rem'>";
   html += "<button class='btn btn-dark' id='lic-close'>Close</button>";
   html += " <button class='btn btn-accent' id='lic-print'>&#128424; Print / Save PDF</button>";
-  if(S.adminUnlocked && h.email)
+  if(S.adminUnlocked && h.ownerEmail)
     html += " <button class='btn btn-green' id='lic-email' data-idx='"+h.rowIndex+"'>&#9993; Send License</button>";
-  if(S.adminUnlocked && !h.email)
-    html += " <span style='font-size:.75rem;color:var(--red)'>No email on file</span>";
+  if(S.adminUnlocked && !h.ownerEmail)
+    html += " <span style='font-size:.75rem;color:var(--red)'>No email — owner not matched in membership</span>";
   html += "</div></div></div>";
   root.innerHTML = html;
 
@@ -626,14 +642,16 @@ function showDetailModal(h){
   var html = "<div class='modal-overlay' id='det-modal'><div class='modal'>";
   html += "<h3 style='font-family:Oswald;color:var(--accent)'>"+esc(h.horse)+"</h3>";
   html += "<table style='margin:.75rem 0;font-size:.85rem'><tbody>";
-  html += "<tr><td style='color:var(--muted);padding-right:1rem'>Owner</td><td>"+esc(h.owner)+"</td></tr>";
-  html += "<tr><td style='color:var(--muted)'>CoWN #</td><td>"+esc(h.cownNum)+"</td></tr>";
-  html += "<tr><td style='color:var(--muted)'>Rider</td><td>"+esc(h.rider)+"</td></tr>";
+  html += "<tr><td style='color:var(--muted);padding-right:1rem'>Owner</td><td>"+esc(h.owner)+ownerBadge(h)+"</td></tr>";
+  html += "<tr><td style='color:var(--muted)'>Owner CoWN #</td><td>"+(h.ownerCownNum||"<span style='color:var(--red)'>Not found in membership</span>")+"</td></tr>";
+  html += "<tr><td style='color:var(--muted)'>Owner Email</td><td>"+(h.ownerEmail||"<span style='color:var(--red)'>Not found</span>")+"</td></tr>";
+  if(h.rider){
+    html += "<tr><td style='color:var(--muted)'>Rider</td><td>"+esc(h.rider)+"</td></tr>";
+    html += "<tr><td style='color:var(--muted)'>Rider CoWN #</td><td>"+(h.riderCownNum||"<span style='color:var(--muted)'>—</span>")+"</td></tr>";
+  }
+  html += "<tr><td style='color:var(--muted)'>Horse #</td><td>"+(h.horseNum||"—")+"</td></tr>";
   html += "<tr><td style='color:var(--muted)'>Year</td><td><span class='badge badge-year'>"+h.year+"</span></td></tr>";
   if(h.licNum) html += "<tr><td style='color:var(--muted)'>License #</td><td><code>"+esc(h.licNum)+"</code></td></tr>";
-  if(h.email)  html += "<tr><td style='color:var(--muted)'>Email</td><td>"+esc(h.email)+"</td></tr>";
-  if(h.phone)  html += "<tr><td style='color:var(--muted)'>Phone</td><td>"+esc(h.phone)+"</td></tr>";
-  if(h.address) html += "<tr><td style='color:var(--muted)'>Address</td><td>"+esc(h.address+" "+h.city+" "+h.state+" "+h.zip)+"</td></tr>";
   html += "<tr><td style='color:var(--muted)'>License Status</td><td>"+sentBadge(h)+"</td></tr>";
   html += "</tbody></table>";
   html += "<div class='btn-row'><button class='btn btn-dark' id='det-close'>Close</button>"
@@ -709,32 +727,35 @@ function sendBatchLicenses(rowIdxs, btn){
 // ===== LOAD =====
 function autoLoad(){
   showView("loading");
+  // The proxy returns JSON with merged member data when type=horse
   fetch(CONFIG.proxyUrl + "?type=" + CONFIG.sheetType + "&ts=" + Date.now())
-    .then(function(r){ if(!r.ok) throw new Error("HTTP "+r.status); return r.text(); })
-    .then(function(b64){
-      var bin = atob(b64);
-      var arr = new Uint8Array(bin.length);
-      for(var i = 0; i < bin.length; i++) arr[i] = bin.charCodeAt(i);
-      var wb = XLSX.read(arr, { type:"array" });
-      S.horses = parseHorseData(wb);
+    .then(function(r){ if(!r.ok) throw new Error("HTTP "+r.status); return r.json(); })
+    .then(function(data){
+      if(!data || !data.horses) throw new Error("Unexpected response — missing horses array. Check Apps Script is deployed.");
+      S.horses = parseHorseJSON(data);
       showView("lookup");
     })
     .catch(function(e){
       console.error("Load error:", e);
       document.getElementById("loading-view").innerHTML =
-        "<div class='card'><p class='empty'>Could not load data from Google Drive.</p>"
+        "<div class='card'>"
+        +"<p class='empty' style='color:var(--red)'>Could not load from Google Drive.</p>"
+        +"<p style='text-align:center;font-size:.8rem;color:var(--muted);margin-top:.5rem'>"+esc(e.message)+"</p>"
         +"<div class='btn-row' style='justify-content:center;margin-top:1rem'>"
         +"<button class='btn btn-accent' onclick='autoLoad()'>Retry</button>"
-        +"<label class='btn btn-dark' style='cursor:pointer'>Upload File<input type='file' accept='.xlsx,.xls,.csv' id='file-upload-fallback' style='display:none'></label>"
+        +"<label class='btn btn-dark' style='cursor:pointer'>Upload xlsx Instead"
+        +"<input type='file' accept='.xlsx,.xls,.csv' id='file-upload-fallback' style='display:none'></label>"
         +"</div>"
-        +"<p style='text-align:center;margin-top:.75rem;font-size:.8rem;color:var(--muted)'>Or see Admin → Setup Guide to configure the Google Drive connection.</p></div>";
+        +"<p style='text-align:center;margin-top:.75rem;font-size:.75rem;color:var(--muted)'>"
+        +"Note: uploading a file skips the member merge — CoWN numbers and emails won't be filled in automatically.</p>"
+        +"</div>";
       var fu = document.getElementById("file-upload-fallback");
-      if(fu) fu.addEventListener("change", function(e){
-        var file = e.target.files[0]; if(!file) return;
+      if(fu) fu.addEventListener("change", function(ev){
+        var file = ev.target.files[0]; if(!file) return;
         var reader = new FileReader();
-        reader.onload = function(ev){
-          var wb = XLSX.read(new Uint8Array(ev.target.result), { type:"array" });
-          S.horses = parseHorseData(wb);
+        reader.onload = function(e2){
+          var wb = XLSX.read(new Uint8Array(e2.target.result), { type:"array" });
+          S.horses = parseHorseXLSX(wb);
           showView("lookup");
         };
         reader.readAsArrayBuffer(file);
