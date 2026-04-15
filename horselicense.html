@@ -464,9 +464,7 @@ function sendBatchLicenses(rowIdxs,btn){
   function sendNext(i){
     if(i>=total){
       btn.textContent="Done! Sent "+sent+"/"+total;
-      if(failed>0) alert(failed+" failed:
-"+failedNames.join("
-"));
+      if(failed>0) alert(failed+" failed:\n"+failedNames.join("\n"));
       setTimeout(function(){ btn.textContent=orig; btn.disabled=false; },4000); return;
     }
     var idx=rowIdxs[i];
@@ -502,7 +500,7 @@ function autoLoad(){
     });
 }
 
-document.getElementById("hdr-logo").src = LOGO_IMG;
+try{var _b=LOGO_IMG.split(','),_s=atob(_b[1]),_a=new Uint8Array(_s.length);for(var _i=0;_i<_s.length;_i++)_a[_i]=_s.charCodeAt(_i);document.getElementById('hdr-logo').src=URL.createObjectURL(new Blob([_a],{type:'image/jpeg'}));}catch(e){}
 autoLoad();
 </script>
 </body>
