@@ -111,10 +111,8 @@ var LOGO_IMG = "data:image/jpeg;base64,/9j/4AAQSkZJRgABAQAAAQABAAD/4gHYSUNDX1BST
 
 // ===== CONFIG =====
 var CONFIG = {
-  // Same proxy URL as membership hub — append &type=horse to distinguish the sheet
   proxyUrl: "https://script.google.com/macros/s/AKfycbzwTmJwxmPFdCnvKtovw1Lp9p6iDbFtfpEhR8IN74cXrPypny3xHUNfS6TM04Q92vn9Hw/exec",
   password: "cown2026",
-  // Change this to match whatever your horse license sheet tab is named in Google Drive
   sheetType: "horse"
 };
 
@@ -123,354 +121,387 @@ var S = { view: "loading", horses: [], adminUnlocked: false, pendingView: null }
 
 // ===== HELPERS =====
 function esc(s){ return String(s||"").replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;"); }
-
 function currentYear(){ return new Date().getFullYear(); }
-
 function parseSentStatus(raw){
   var s = String(raw||"").trim().toLowerCase();
   if(s === "send") return "send";
   if(s.indexOf("sent") === 0) return "sent";
   return "";
 }
-
 function sentBadge(h){
   if(h.sentStatus === "send") return "<span class='badge badge-send'>&#9993; Send</span>";
   if(h.sentStatus === "sent") return "<span class='badge badge-sent'>&#10003; Sent</span>";
   return "<span class='badge badge-none'>—</span>";
 }
 
-function ownerBadge(h){
-  if(h.ownerFound === false)
-    return " <span class='badge' style='background:rgba(231,76,60,.15);color:var(--red)' title='Owner name not found in membership sheet'>&#9888; No match</span>";
-  if(h.ownerCownNum)
-    return " <span class='badge badge-year'>#"+esc(h.ownerCownNum)+"</span>";
-  return "";
-}
-
 // ===== PARSE DATA =====
-// Called when proxy returns JSON (merged server-side by Apps Script)
 function parseHorseJSON(data){
   var raw = data.horses || [];
-  console.log("Received " + raw.length + " horse licenses from proxy. Member index size: " + (data.memberCount || "?"));
-  // The proxy already did the merge — just normalise sentStatus client-side
-  // in case the sheet value changed since the proxy built the object
-  raw.forEach(function(h){
-    h.sentStatus = parseSentStatus(h.sentRaw || h.sentStatus || "");
-  });
-  return raw.sort(function(a,b){ return a.owner.localeCompare(b.owner) || a.horse.localeCompare(b.horse); });
+  console.log("Received " + raw.length + " horse licenses. Member index: " + (data.memberCount||"?"));
+  raw.forEach(function(h){ h.sentStatus = parseSentStatus(h.sentRaw || h.sentStatus || ""); });
+  return raw.sort(function(a,b){ return (a.owner||"").localeCompare(b.owner||"") || (a.horse||"").localeCompare(b.horse||""); });
 }
-
-// Called when user manually uploads an xlsx file (fallback path — no member merge)
 function parseHorseXLSX(wb){
   var horses = [];
-  var shName = wb.SheetNames.find(function(n){
-    return n.toLowerCase().indexOf("horse") > -1 || n.toLowerCase().indexOf("license") > -1;
-  }) || wb.SheetNames[0];
-
-  var raw = XLSX.utils.sheet_to_json(wb.Sheets[shName], { defval: null });
-  if(raw.length > 0) console.log("Horse sheet columns:", Object.keys(raw[0]));
-
-  for(var i = 0; i < raw.length; i++){
-    var row = raw[i];
-    var lk = {};
-    Object.keys(row).forEach(function(k){ lk[k.toLowerCase().trim()] = row[k]; });
-
-    var horse = String(lk["horse"] || lk["horse name"] || "").trim();
-    var owner = String(lk["owner"] || lk["owner name"] || "").trim();
-    if(!horse && !owner) continue;
-
-    var rawSent = String(lk["sent"] || "").trim();
+  var shName = wb.SheetNames.find(function(n){ return n.toLowerCase().indexOf("horse")>-1||n.toLowerCase().indexOf("license")>-1; }) || wb.SheetNames[0];
+  var raw = XLSX.utils.sheet_to_json(wb.Sheets[shName], {defval:null});
+  for(var i=0;i<raw.length;i++){
+    var row=raw[i], lk={};
+    Object.keys(row).forEach(function(k){ lk[k.toLowerCase().trim()]=row[k]; });
+    var horse=String(lk["horse"]||lk["horse name"]||"").trim();
+    var owner=String(lk["owner"]||lk["owner name"]||"").trim();
+    if(!horse&&!owner) continue;
+    var rawSent=String(lk["emailed"]||lk["sent"]||"").trim();
     horses.push({
-      horse:        horse,
-      owner:        owner,
-      horseNum:     String(lk["cown horse number"] || lk["cown horse #"] || lk["horse number"] || lk["horse #"] || "").trim(),
-      ownerCownNum: "",
-      ownerEmail:   String(lk["email"] || lk["recipient"] || "").trim(),
-      rider:        String(lk["rider"] || lk["rider name"] || "").trim(),
-      riderCownNum: "",
-      riderEmail:   "",
-      year:         parseInt(lk["year"] || lk["license year"] || lk["yr"] || 0) || currentYear(),
-      licNum:       String(lk["license #"] || lk["license number"] || lk["lic #"] || "").trim(),
-      sentStatus:   parseSentStatus(rawSent),
-      sentRaw:      rawSent,
-      rowIndex:     i,
-      ownerFound:   true,
-      riderFound:   true
+      horse:horse, owner:owner,
+      horseNum:String(lk["cown horse number"]||lk["cown horse #"]||lk["horse number"]||lk["horse #"]||"").trim(),
+      ownerCownNum:"", ownerEmail:String(lk["email"]||lk["recipient"]||"").trim(),
+      rider:String(lk["rider"]||lk["rider name"]||"").trim(),
+      riderCownNum:"", riderEmail:"",
+      year:parseInt(lk["year"]||lk["license year"]||lk["yr"]||0)||currentYear(),
+      licNum:String(lk["license #"]||lk["license number"]||lk["lic #"]||"").trim(),
+      sentStatus:parseSentStatus(rawSent), sentRaw:rawSent, rowIndex:i,
+      ownerFound:true, riderFound:true
     });
   }
-  console.log("Parsed " + horses.length + " horse licenses from file (no member merge)");
-  return horses.sort(function(a,b){ return a.owner.localeCompare(b.owner) || a.horse.localeCompare(b.horse); });
+  return horses.sort(function(a,b){ return (a.owner||"").localeCompare(b.owner||"")||(a.horse||"").localeCompare(b.horse||""); });
 }
 
 // ===== TABS & VIEWS =====
 function renderTabs(){
-  var tabs = [{ id:"lookup", l:"Horse Lookup" }];
-  if(S.adminUnlocked) tabs.push({ id:"dashboard", l:"Dashboard" }, { id:"licenses", l:"Licenses" }, { id:"setup", l:"Setup Guide" }, { id:"settings", l:"Settings" });
-  var h = tabs.map(function(t){
-    return "<button class='tab"+(S.view===t.id?" active":"")+"' data-view='"+t.id+"'>"+t.l+"</button>";
-  }).join("");
-  if(!S.adminUnlocked) h += "<button class='tab' id='admin-unlock-btn' style='margin-left:auto;color:var(--muted)'>Admin</button>";
-  document.getElementById("tabs").innerHTML = h;
-  document.querySelectorAll(".tab").forEach(function(b){
-    if(b.dataset.view) b.addEventListener("click", function(){ showView(b.dataset.view); });
-  });
-  var u = document.getElementById("admin-unlock-btn");
-  if(u) u.addEventListener("click", function(){
-    S.pendingView = "dashboard";
-    document.getElementById("pwd-gate").classList.remove("hidden");
-    document.getElementById("pwd-input").focus();
-  });
+  var tabs=[{id:"lookup",l:"Horse Lookup"}];
+  if(S.adminUnlocked) tabs.push({id:"dashboard",l:"Dashboard"},{id:"licenses",l:"Licenses"},{id:"settings",l:"Settings"});
+  var h=tabs.map(function(t){ return "<button class='tab"+(S.view===t.id?" active":"")+"' data-view='"+t.id+"'>"+t.l+"</button>"; }).join("");
+  if(!S.adminUnlocked) h+="<button class='tab' id='admin-unlock-btn' style='margin-left:auto;color:var(--muted)'>Admin</button>";
+  document.getElementById("tabs").innerHTML=h;
+  document.querySelectorAll(".tab").forEach(function(b){ if(b.dataset.view) b.addEventListener("click",function(){ showView(b.dataset.view); }); });
+  var u=document.getElementById("admin-unlock-btn");
+  if(u) u.addEventListener("click",function(){ S.pendingView="dashboard"; document.getElementById("pwd-gate").classList.remove("hidden"); document.getElementById("pwd-input").focus(); });
 }
-
 function showView(v){
-  var needsPwd = ["dashboard","licenses","setup","settings"];
-  if(needsPwd.indexOf(v) > -1 && !S.adminUnlocked){
-    S.pendingView = v;
-    document.getElementById("pwd-gate").classList.remove("hidden");
-    document.getElementById("pwd-input").focus();
-    return;
-  }
-  S.view = v;
-  ["loading","lookup","dashboard","licenses","setup","settings"].forEach(function(id){
-    document.getElementById(id+"-view").classList.toggle("hidden", id !== v);
-  });
+  var needsPwd=["dashboard","licenses","settings"];
+  if(needsPwd.indexOf(v)>-1&&!S.adminUnlocked){ S.pendingView=v; document.getElementById("pwd-gate").classList.remove("hidden"); document.getElementById("pwd-input").focus(); return; }
+  S.view=v;
+  ["loading","lookup","dashboard","licenses","settings"].forEach(function(id){ document.getElementById(id+"-view").classList.toggle("hidden",id!==v); });
   renderTabs();
-  if(v === "lookup")    renderLookup();
-  if(v === "dashboard") renderDashboard();
-  if(v === "licenses")  renderLicenses();
-  if(v === "setup")     renderSetup();
-  if(v === "settings")  renderSettings();
+  if(v==="lookup") renderLookup();
+  if(v==="dashboard") renderDashboard();
+  if(v==="licenses") renderLicenses();
+  if(v==="settings") renderSettings();
 }
-
-// Password gate
-document.getElementById("pwd-btn").addEventListener("click", function(){
-  if(document.getElementById("pwd-input").value === CONFIG.password){
-    S.adminUnlocked = true;
-    document.getElementById("pwd-gate").classList.add("hidden");
-    document.getElementById("pwd-input").value = "";
-    showView(S.pendingView || "dashboard");
+document.getElementById("pwd-btn").addEventListener("click",function(){
+  if(document.getElementById("pwd-input").value===CONFIG.password){
+    S.adminUnlocked=true; document.getElementById("pwd-gate").classList.add("hidden"); document.getElementById("pwd-input").value="";
+    showView(S.pendingView||"dashboard");
   } else { alert("Wrong password"); }
 });
-document.getElementById("pwd-cancel").addEventListener("click", function(){
-  document.getElementById("pwd-gate").classList.add("hidden");
-  document.getElementById("pwd-input").value = "";
-});
-document.getElementById("pwd-input").addEventListener("keydown", function(e){ if(e.key === "Enter") document.getElementById("pwd-btn").click(); });
+document.getElementById("pwd-cancel").addEventListener("click",function(){ document.getElementById("pwd-gate").classList.add("hidden"); document.getElementById("pwd-input").value=""; });
+document.getElementById("pwd-input").addEventListener("keydown",function(e){ if(e.key==="Enter") document.getElementById("pwd-btn").click(); });
 
 // ===== LOOKUP =====
 function renderLookup(){
-  var el = document.getElementById("lookup-view");
-  el.innerHTML = "<div class='card'><div class='card-hdr'><h2>Horse License Lookup</h2><p>Search by horse name, owner, rider, or CoWN number</p></div>"
+  var el=document.getElementById("lookup-view");
+  el.innerHTML="<div class='card'><div class='card-hdr'><h2>Horse License Lookup</h2><p>Search by horse, owner, rider, or year</p></div>"
     +"<div class='search-wrap'><span class='search-icon'>&#128269;</span><input class='search-box' id='lookup-q' placeholder='Enter horse, owner, rider, or year...'></div>"
     +"<div id='lookup-results'></div></div>";
-
-  document.getElementById("lookup-q").addEventListener("input", function(){
-    var q = this.value.trim().toLowerCase();
-    var res = document.getElementById("lookup-results");
-    if(q.length < 2){ res.innerHTML = ""; return; }
-    var matches = S.horses.filter(function(h){
-      return (h.horse||"").toLowerCase().indexOf(q) > -1
-          || (h.owner||"").toLowerCase().indexOf(q) > -1
-          || (h.rider||"").toLowerCase().indexOf(q) > -1
-          || String(h.ownerCownNum||"").toLowerCase().indexOf(q) > -1
-          || String(h.horseNum||"").toLowerCase().indexOf(q) > -1
-          || String(h.year||"").indexOf(q) > -1;
+  document.getElementById("lookup-q").addEventListener("input",function(){
+    var q=this.value.trim().toLowerCase();
+    var res=document.getElementById("lookup-results");
+    if(q.length<2){ res.innerHTML=""; return; }
+    var matches=S.horses.filter(function(h){
+      return (h.horse||"").toLowerCase().indexOf(q)>-1
+          ||(h.owner||"").toLowerCase().indexOf(q)>-1
+          ||(h.rider||"").toLowerCase().indexOf(q)>-1
+          ||String(h.horseNum||"").toLowerCase().indexOf(q)>-1
+          ||String(h.year||"").indexOf(q)>-1;
     });
-    if(!matches.length){ res.innerHTML = "<p class='empty'>No licenses found</p>"; return; }
-    var t = "<table><thead><tr><th>Horse</th><th>Owner</th><th>Rider</th><th>Year</th><th></th></tr></thead><tbody>";
-    matches.slice(0, 25).forEach(function(h){
-      var riderDisplay = h.rider || h.owner; // show owner name if rider is same/blank
-      t += "<tr><td class='bold'>"+esc(h.horse)+"</td><td>"+esc(h.owner)+"</td>"
-         +"<td>"+esc(riderDisplay)+"</td>"
-         +"<td class='ctr'><span class='badge badge-year'>"+h.year+"</span></td>"
-         +"<td><button class='btn btn-accent btn-sm view-lic-btn' data-idx='"+h.rowIndex+"'>View</button></td></tr>";
+    if(!matches.length){ res.innerHTML="<p class='empty'>No licenses found</p>"; return; }
+    var t="<table><thead><tr><th>Horse</th><th>Owner</th><th>Rider</th><th>Year</th><th></th></tr></thead><tbody>";
+    matches.slice(0,25).forEach(function(h){
+      var rd=h.rider||h.owner;
+      t+="<tr><td class='bold'>"+esc(h.horse)+"</td><td>"+esc(h.owner)+"</td><td>"+esc(rd)+"</td>"
+        +"<td class='ctr'><span class='badge badge-year'>"+h.year+"</span></td>"
+        +"<td><button class='btn btn-accent btn-sm vlb' data-idx='"+h.rowIndex+"'>View</button></td></tr>";
     });
-    t += "</tbody></table>";
-    res.innerHTML = t;
-    res.querySelectorAll(".view-lic-btn").forEach(function(b){
-      b.addEventListener("click", function(){
-        var idx = parseInt(this.dataset.idx);
-        var horse = S.horses.find(function(h){ return h.rowIndex === idx; });
-        if(horse) showLicenseModal(horse);
-      });
-    });
+    t+="</tbody></table>";
+    res.innerHTML=t;
+    res.querySelectorAll(".vlb").forEach(function(b){ b.addEventListener("click",function(){ var horse=S.horses.find(function(h){ return h.rowIndex===parseInt(this.dataset.idx); },this); if(horse) showLicenseModal(horse); }); });
   });
 }
 
 // ===== DASHBOARD =====
 function renderDashboard(){
-  var el = document.getElementById("dashboard-view");
-  var byYear = {};
-  S.horses.forEach(function(h){ byYear[h.year] = (byYear[h.year]||0) + 1; });
-  var years = Object.keys(byYear).sort(function(a,b){ return b - a; });
-
-  var queued = S.horses.filter(function(h){ return h.sentStatus === "send"; });
-  var sent   = S.horses.filter(function(h){ return h.sentStatus === "sent"; });
-
-  var h = "<div class='card'><div class='card-hdr'><h2>Dashboard</h2><p>Overview of all horse licenses</p></div>";
-  h += "<div class='stats'>";
-  h += "<div class='stat total-stat'><div class='num'>"+S.horses.length+"</div><div class='lbl'>Total Licenses</div></div>";
-  h += "<div class='stat gold-stat'><div class='num'>"+currentYear()+"</div><div class='lbl'>Current Year</div></div>";
-  h += "<div class='stat green-stat'><div class='num'>"+queued.length+"</div><div class='lbl'>Queued to Send</div></div>";
-  h += "<div class='stat blue-stat'><div class='num'>"+sent.length+"</div><div class='lbl'>Already Sent</div></div>";
-  h += "</div>";
-
-  // Year breakdown
-  if(years.length > 1){
-    h += "<div style='margin:.75rem 0'><table><thead><tr><th>Year</th><th>Licenses</th></tr></thead><tbody>";
-    years.forEach(function(y){
-      h += "<tr><td><span class='badge badge-year'>"+y+"</span></td><td>"+byYear[y]+"</td></tr>";
-    });
-    h += "</tbody></table></div>";
-  }
-
-  // Full list
-  h += "<div class='search-wrap'><span class='search-icon'>&#128269;</span><input class='search-box' id='dash-q' placeholder='Search all licenses...'></div>";
-  h += "<div id='dash-table'></div></div>";
-  el.innerHTML = h;
-
+  var el=document.getElementById("dashboard-view");
+  var queued=S.horses.filter(function(h){ return h.sentStatus==="send"; });
+  var sent=S.horses.filter(function(h){ return h.sentStatus==="sent"; });
+  var h="<div class='card'><div class='card-hdr'><h2>Dashboard</h2></div>";
+  h+="<div class='stats'>";
+  h+="<div class='stat total-stat'><div class='num'>"+S.horses.length+"</div><div class='lbl'>Total</div></div>";
+  h+="<div class='stat gold-stat'><div class='num'>"+currentYear()+"</div><div class='lbl'>Current Year</div></div>";
+  h+="<div class='stat green-stat'><div class='num'>"+queued.length+"</div><div class='lbl'>Queued</div></div>";
+  h+="<div class='stat blue-stat'><div class='num'>"+sent.length+"</div><div class='lbl'>Sent</div></div>";
+  h+="</div>";
+  h+="<div class='search-wrap'><span class='search-icon'>&#128269;</span><input class='search-box' id='dash-q' placeholder='Search...'></div>";
+  h+="<div id='dash-table'></div></div>";
+  el.innerHTML=h;
   function renderTable(){
-    var q = (document.getElementById("dash-q")||{value:""}).value.trim().toLowerCase();
-    var list = q ? S.horses.filter(function(h){
-      return (h.horse||"").toLowerCase().indexOf(q) > -1
-          || (h.owner||"").toLowerCase().indexOf(q) > -1
-          || (h.rider && h.rider.toLowerCase().indexOf(q) > -1)
-          || String(h.ownerCownNum||"").indexOf(q) > -1
-          || String(h.horseNum||"").indexOf(q) > -1
-          || String(h.year).indexOf(q) > -1;
-    }) : S.horses;
-    var t = "<div style='overflow-x:auto'><table><thead><tr><th>Horse</th><th>Owner</th><th>Rider</th><th>Year</th><th>Sent</th></tr></thead><tbody>";
-    list.slice(0, 100).forEach(function(h){
-      var riderDisplay = h.rider || h.owner;
-      t += "<tr class='dash-row' data-idx='"+h.rowIndex+"' style='cursor:pointer'>"
-         +"<td class='bold'>"+esc(h.horse)+"</td><td>"+esc(h.owner)+"</td>"
-         +"<td>"+esc(riderDisplay)+"</td>"
-         +"<td class='ctr'><span class='badge badge-year'>"+h.year+"</span></td>"
-         +"<td class='ctr'>"+sentBadge(h)+"</td></tr>";
+    var q=(document.getElementById("dash-q")||{value:""}).value.trim().toLowerCase();
+    var list=q?S.horses.filter(function(h){
+      return (h.horse||"").toLowerCase().indexOf(q)>-1||(h.owner||"").toLowerCase().indexOf(q)>-1
+            ||(h.rider||"").toLowerCase().indexOf(q)>-1||String(h.year||"").indexOf(q)>-1;
+    }):S.horses;
+    var t="<div style='overflow-x:auto'><table><thead><tr><th>Horse</th><th>Owner</th><th>Rider</th><th>Year</th><th>Sent</th></tr></thead><tbody>";
+    list.slice(0,100).forEach(function(h){
+      var rd=h.rider||h.owner;
+      t+="<tr class='dash-row' data-idx='"+h.rowIndex+"' style='cursor:pointer'>"
+        +"<td class='bold'>"+esc(h.horse)+"</td><td>"+esc(h.owner)+"</td><td>"+esc(rd)+"</td>"
+        +"<td class='ctr'><span class='badge badge-year'>"+h.year+"</span></td>"
+        +"<td class='ctr'>"+sentBadge(h)+"</td></tr>";
     });
-    t += "</tbody></table></div>";
-    if(!list.length) t = "<p class='empty'>No licenses match</p>";
-    document.getElementById("dash-table").innerHTML = t;
+    t+="</tbody></table></div>";
+    if(!list.length) t="<p class='empty'>No licenses match</p>";
+    document.getElementById("dash-table").innerHTML=t;
     document.querySelectorAll(".dash-row").forEach(function(r){
-      r.addEventListener("click", function(){
-        var idx = parseInt(this.dataset.idx);
-        var horse = S.horses.find(function(h){ return h.rowIndex === idx; });
-        if(horse) showDetailModal(horse);
-      });
+      r.addEventListener("click",function(){ var horse=S.horses.find(function(h){ return h.rowIndex===parseInt(this.dataset.idx); },this); if(horse) showDetailModal(horse); });
     });
   }
-
   renderTable();
-  document.getElementById("dash-q").addEventListener("input", renderTable);
+  document.getElementById("dash-q").addEventListener("input",renderTable);
 }
 
-// ===== LICENSES (print/send) =====
+// ===== LICENSES =====
 function renderLicenses(){
-  var el = document.getElementById("licenses-view");
-  var queued = S.horses.filter(function(h){ return h.sentStatus === "send"; });
-  var sent   = S.horses.filter(function(h){ return h.sentStatus === "sent"; });
-  var blank  = S.horses.filter(function(h){ return h.sentStatus === ""; });
-
-  var h = "<div class='card'><div class='card-hdr'><h2>Horse Licenses</h2>"
-    +"<p>Print or send horse licenses. In your spreadsheet, type <strong>send</strong> in the <strong>Emailed</strong> column to queue a license. After sending, the date will be written back automatically.</p></div>";
-
-  h += "<div class='stats' style='margin-bottom:1rem'>";
-  h += "<div class='stat green-stat'><div class='num'>"+queued.length+"</div><div class='lbl'>Queued to Send</div></div>";
-  h += "<div class='stat total-stat'><div class='num'>"+blank.length+"</div><div class='lbl'>No Action</div></div>";
-  h += "<div class='stat blue-stat'><div class='num'>"+sent.length+"</div><div class='lbl'>Already Sent</div></div>";
-  h += "</div>";
-
-  h += "<div class='btn-row' style='margin-bottom:1rem'>";
-  h += "<button class='btn btn-accent' id='batch-print'>&#128424; Print All Licenses</button>";
-  if(queued.length > 0)
-    h += "<button class='btn btn-green' id='batch-send'>&#9993; Send "+queued.length+" Queued</button>";
-  h += "</div>";
-
-  h += "<div class='search-wrap'><span class='search-icon'>&#128269;</span><input class='search-box' id='lic-q' placeholder='Search licenses...'></div>";
-  h += "<div class='pills' style='margin-bottom:.75rem'>";
-  h += "<button class='pill active' data-lf='all'>All <span class='ct'>("+S.horses.length+")</span></button>";
-  h += "<button class='pill' data-lf='send'>Queued <span class='ct'>("+queued.length+")</span></button>";
-  h += "<button class='pill' data-lf='sent'>Sent <span class='ct'>("+sent.length+")</span></button>";
-  h += "<button class='pill' data-lf=''>No Action <span class='ct'>("+blank.length+")</span></button>";
-  h += "</div>";
-  h += "<div id='lic-results'></div></div>";
-  el.innerHTML = h;
-
-  var licFilter = "all";
-
+  var el=document.getElementById("licenses-view");
+  var queued=S.horses.filter(function(h){ return h.sentStatus==="send"; });
+  var sent=S.horses.filter(function(h){ return h.sentStatus==="sent"; });
+  var blank=S.horses.filter(function(h){ return h.sentStatus===""; });
+  var h="<div class='card'><div class='card-hdr'><h2>Horse Licenses</h2>"
+    +"<p>Type <strong>send</strong> in the <strong>Emailed</strong> column to queue. Date is written back automatically after sending.</p></div>";
+  h+="<div class='stats' style='margin-bottom:1rem'>";
+  h+="<div class='stat green-stat'><div class='num'>"+queued.length+"</div><div class='lbl'>Queued</div></div>";
+  h+="<div class='stat total-stat'><div class='num'>"+blank.length+"</div><div class='lbl'>No Action</div></div>";
+  h+="<div class='stat blue-stat'><div class='num'>"+sent.length+"</div><div class='lbl'>Sent</div></div>";
+  h+="</div>";
+  h+="<div class='btn-row' style='margin-bottom:1rem'>";
+  h+="<button class='btn btn-accent' id='batch-print'>&#128424; Print All</button>";
+  if(queued.length>0) h+="<button class='btn btn-green' id='batch-send'>&#9993; Send "+queued.length+" Queued</button>";
+  h+="</div>";
+  h+="<div class='search-wrap'><span class='search-icon'>&#128269;</span><input class='search-box' id='lic-q' placeholder='Search...'></div>";
+  h+="<div class='pills' style='margin-bottom:.75rem'>";
+  h+="<button class='pill active' data-lf='all'>All ("+S.horses.length+")</button>";
+  h+="<button class='pill' data-lf='send'>Queued ("+queued.length+")</button>";
+  h+="<button class='pill' data-lf='sent'>Sent ("+sent.length+")</button>";
+  h+="<button class='pill' data-lf=''>No Action ("+blank.length+")</button>";
+  h+="</div><div id='lic-results'></div></div>";
+  el.innerHTML=h;
+  var licFilter="all";
   function renderLicList(q){
-    var list = S.horses;
-    if(licFilter !== "all") list = S.horses.filter(function(h){ return h.sentStatus === licFilter; });
-    if(q) list = list.filter(function(h){
-      return (h.horse||"").toLowerCase().indexOf(q) > -1
-          || (h.owner||"").toLowerCase().indexOf(q) > -1
-          || (h.rider && h.rider.toLowerCase().indexOf(q) > -1)
-          || String(h.year).indexOf(q) > -1;
+    var list=S.horses;
+    if(licFilter!=="all") list=S.horses.filter(function(h){ return h.sentStatus===licFilter; });
+    if(q) list=list.filter(function(h){ return (h.horse||"").toLowerCase().indexOf(q)>-1||(h.owner||"").toLowerCase().indexOf(q)>-1||(h.rider||"").toLowerCase().indexOf(q)>-1||String(h.year||"").indexOf(q)>-1; });
+    var res=document.getElementById("lic-results");
+    if(!list.length){ res.innerHTML="<p class='empty'>No licenses match</p>"; return; }
+    var t="<div style='overflow-x:auto'><table><thead><tr><th>Horse</th><th>Owner</th><th>Rider</th><th>Year</th><th>Sent</th><th></th></tr></thead><tbody>";
+    list.slice(0,60).forEach(function(h){
+      var rd=h.rider||h.owner;
+      t+="<tr><td class='bold'>"+esc(h.horse)+"</td><td>"+esc(h.owner)+"</td><td>"+esc(rd)+"</td>"
+        +"<td class='ctr'><span class='badge badge-year'>"+h.year+"</span></td>"
+        +"<td class='ctr'>"+sentBadge(h)+"</td>"
+        +"<td><button class='btn btn-dark btn-sm vlb' data-idx='"+h.rowIndex+"'>View</button>"
+        +(h.riderEmail?" <button class='btn btn-green btn-sm slb' data-idx='"+h.rowIndex+"'>&#9993; Send</button>":"<span style='font-size:.7rem;color:var(--red)'>No email</span>")
+        +"</td></tr>";
     });
-    var res = document.getElementById("lic-results");
-    if(!list.length){ res.innerHTML = "<p class='empty'>No licenses match</p>"; return; }
-    var t = "<div style='overflow-x:auto'><table><thead><tr><th>Horse</th><th>Owner</th><th>Rider</th><th>Year</th><th>Sent</th><th></th></tr></thead><tbody>";
-    list.slice(0, 60).forEach(function(h){
-      var riderDisplay = h.rider || h.owner;
-      t += "<tr><td class='bold'>"+esc(h.horse)+"</td><td>"+esc(h.owner)+"</td>"
-         +"<td>"+esc(riderDisplay)+"</td>"
-         +"<td class='ctr'><span class='badge badge-year'>"+h.year+"</span></td>"
-         +"<td class='ctr'>"+sentBadge(h)+"</td>"
-         +"<td><button class='btn btn-dark btn-sm view-lic-btn' data-idx='"+h.rowIndex+"'>View</button>"
-         +(h.riderEmail ? " <button class='btn btn-green btn-sm send-lic-btn' data-idx='"+h.rowIndex+"'>&#9993; Send</button>"
-                        : " <span style='font-size:.7rem;color:var(--red)'>No email</span>")
-         +"</td></tr>";
-    });
-    t += "</tbody></table></div>";
-    res.innerHTML = t;
-    res.querySelectorAll(".view-lic-btn").forEach(function(b){
-      b.addEventListener("click", function(){
-        var idx = parseInt(this.dataset.idx);
-        var horse = S.horses.find(function(h){ return h.rowIndex === idx; });
-        if(horse) showLicenseModal(horse);
-      });
-    });
-    res.querySelectorAll(".send-lic-btn").forEach(function(b){
-      b.addEventListener("click", function(){ sendLicenseEmail(parseInt(this.dataset.idx), this); });
-    });
+    t+="</tbody></table></div>";
+    res.innerHTML=t;
+    res.querySelectorAll(".vlb").forEach(function(b){ b.addEventListener("click",function(){ var horse=S.horses.find(function(h){ return h.rowIndex===parseInt(this.dataset.idx); },this); if(horse) showLicenseModal(horse); }); });
+    res.querySelectorAll(".slb").forEach(function(b){ b.addEventListener("click",function(){ sendLicenseEmail(parseInt(this.dataset.idx),this); }); });
   }
-
   renderLicList("");
-  document.getElementById("lic-q").addEventListener("input", function(){ renderLicList(this.value.trim().toLowerCase()); });
+  document.getElementById("lic-q").addEventListener("input",function(){ renderLicList(this.value.trim().toLowerCase()); });
   el.querySelectorAll("[data-lf]").forEach(function(b){
-    b.addEventListener("click", function(){
-      licFilter = b.dataset.lf;
+    b.addEventListener("click",function(){
+      licFilter=b.dataset.lf;
       el.querySelectorAll("[data-lf]").forEach(function(p){ p.classList.remove("active"); });
       b.classList.add("active");
       renderLicList((document.getElementById("lic-q")||{value:""}).value.trim().toLowerCase());
     });
   });
-
-  document.getElementById("batch-print").addEventListener("click", function(){
-    var win = window.open("", "", "width=600,height=800");
-    win.document.write("<!DOCTYPE html><html><head>"
-      +"<link href='https://fonts.googleapis.com/css2?family=Oswald:wght@400;600;700&family=Source+Sans+3:wght@400;600&display=swap' rel='stylesheet'>"
-      +"<style>body{font-family:'Source Sans 3',sans-serif;padding:1rem;background:#fff;color:#333}"
-      +"@media print{.license-page{page-break-after:always}.license-card{-webkit-print-color-adjust:exact;print-color-adjust:exact}}"
-      +".license-page{max-width:540px;margin:0 auto 2rem;padding:1.5rem}</style></head><body>");
-    S.horses.forEach(function(h){ win.document.write("<div class='license-page'>"+buildLicenseHTML(h)+"</div>"); });
-    win.document.write("</body></html>");
-    win.document.close();
-    setTimeout(function(){ win.print(); }, 500);
+  document.getElementById("batch-print").addEventListener("click",function(){
+    var win=window.open("","","width=600,height=800");
+    win.document.write("<!DOCTYPE html><html><head><link href='https://fonts.googleapis.com/css2?family=Oswald:wght@400;600;700&family=Source+Sans+3:wght@400;600&display=swap' rel='stylesheet'><style>body{font-family:Source Sans 3,sans-serif;padding:1rem;background:#fff}@media print{.lp{page-break-after:always}}.lp{max-width:540px;margin:0 auto 2rem;padding:1.5rem}</style></head><body>");
+    S.horses.forEach(function(h){ win.document.write("<div class='lp'>"+buildLicenseHTML(h)+"</div>"); });
+    win.document.write("</body></html>"); win.document.close();
+    setTimeout(function(){ win.print(); },500);
   });
-
-  var batchBtn = document.getElementById("batch-send");
-  if(batchBtn){
-    batchBtn.addEventListener("click", function(){
-      var q2 = S.horses.filter(function(h){ return h.sentStatus === "send"; });
-      if(!q2.length){ alert("No licenses are queued to send."); return; }
-      if(!confirm("Send horse licenses to "+q2.length+" entries marked 'send'?")) return;
-      var idxs = q2.map(function(h){ return h.rowIndex; });
-      sendBatchLicenses(idxs, this);
-    });
-  }
+  var bb=document.getElementById("batch-send");
+  if(bb){ bb.addEventListener("click",function(){
+    var q2=S.horses.filter(function(h){ return h.sentStatus==="send"; });
+    if(!q2.length){ alert("No licenses queued."); return; }
+    if(!confirm("Send to "+q2.length+" queued?")) return;
+    sendBatchLicenses(q2.map(function(h){ return h.rowIndex; }),this);
+  }); }
 }
-// Set logo using the same base64 data as the membership hub
+
+// ===== SETTINGS =====
+function renderSettings(){
+  var el=document.getElementById("settings-view");
+  var h="<div class='card'><div class='card-hdr'><h2>Settings</h2></div>";
+  h+="<div class='stats'>";
+  h+="<div class='stat total-stat'><div class='num'>"+S.horses.length+"</div><div class='lbl'>Total Licenses</div></div>";
+  h+="<div class='stat gold-stat'><div class='num'>"+S.horses.filter(function(h){ return h.year===currentYear(); }).length+"</div><div class='lbl'>This Year</div></div>";
+  h+="<div class='stat blue-stat'><div class='num'>"+S.horses.filter(function(h){ return !h.riderEmail; }).length+"</div><div class='lbl'>No Email</div></div>";
+  h+="</div>";
+  h+="<div class='btn-row'><button class='btn btn-accent' id='reload-btn'>Reload from Google Drive</button>"
+    +"<label class='btn btn-dark' style='cursor:pointer'>Upload File<input type='file' accept='.xlsx,.xls,.csv' id='file-upload' style='display:none'></label></div>";
+  h+="<div class='btn-row' style='margin-top:1rem'>"
+    +"<button class='btn btn-dark dl-btn' data-type='all'>Download All</button>"
+    +"<button class='btn btn-dark dl-btn' data-type='year'>Download "+currentYear()+"</button>"
+    +"</div></div>";
+  el.innerHTML=h;
+  document.getElementById("reload-btn").addEventListener("click",function(){ autoLoad(); });
+  document.getElementById("file-upload").addEventListener("change",function(e){
+    var file=e.target.files[0]; if(!file) return;
+    var reader=new FileReader();
+    reader.onload=function(ev){ var wb=XLSX.read(new Uint8Array(ev.target.result),{type:"array"}); S.horses=parseHorseXLSX(wb); showView("dashboard"); };
+    reader.readAsArrayBuffer(file);
+  });
+  el.querySelectorAll(".dl-btn").forEach(function(b){
+    b.addEventListener("click",function(){
+      var yr=currentYear();
+      var list=b.dataset.type==="year"?S.horses.filter(function(h){ return h.year===yr; }):S.horses;
+      var data=list.map(function(h){ return {Horse:h.horse,Owner:h.owner,"CoWN Horse #":h.horseNum,Rider:h.rider,Year:h.year,Email:h.riderEmail,Sent:h.sentRaw}; });
+      var ws=XLSX.utils.json_to_sheet(data); var wb2=XLSX.utils.book_new(); XLSX.utils.book_append_sheet(wb2,ws,"Licenses");
+      XLSX.writeFile(wb2,"CoWN_HorseLicenses.xlsx");
+    });
+  });
+}
+
+// ===== LICENSE CARD HTML =====
+function buildLicenseHTML(h){
+  var rd=h.rider||h.owner;
+  return "<div class='license-card' style='border:2px solid #D4A04A;border-radius:10px;padding:1.25rem 1.5rem;background:#fff;max-width:480px;margin:0 auto;font-family:Source Sans 3,sans-serif;box-shadow:0 2px 10px rgba(0,0,0,.12)'>"
+    +"<div style='display:flex;align-items:center;justify-content:space-between;border-bottom:2px solid #D4A04A;padding-bottom:.75rem;margin-bottom:.75rem'>"
+    +"<img src='"+LOGO_IMG+"' alt='CoWN' style='height:42px;border-radius:4px'>"
+    +"<div style='text-align:right'><div style='font-family:Oswald,sans-serif;font-size:1.1rem;font-weight:700;color:#1a1a2e;letter-spacing:.04em'>HORSE LICENSE</div>"
+    +"<div style='font-size:.85rem;color:#888;margin-top:2px'>CoWN Stock Horse Association</div></div></div>"
+    +"<div style='display:grid;grid-template-columns:1fr 1fr;gap:.6rem .5rem;font-size:.9rem'>"
+    +"<div><div style='font-size:.7rem;color:#999;text-transform:uppercase;letter-spacing:.05em'>Horse</div><div style='font-weight:700;font-size:1rem;color:#1a1a2e'>"+esc(h.horse)+"</div></div>"
+    +"<div><div style='font-size:.7rem;color:#999;text-transform:uppercase;letter-spacing:.05em'>Year</div><div style='font-weight:700;font-size:1rem;color:#D4A04A'>"+h.year+"</div></div>"
+    +"<div><div style='font-size:.7rem;color:#999;text-transform:uppercase;letter-spacing:.05em'>Owner</div><div style='font-weight:600;color:#1a1a2e'>"+esc(h.owner)+(h.ownerCownNum?"<span style='font-size:.75rem;color:#aaa;margin-left:6px'>CoWN #"+esc(h.ownerCownNum)+"</span>":"")+"</div></div>"
+    +"<div><div style='font-size:.7rem;color:#999;text-transform:uppercase;letter-spacing:.05em'>Horse #</div><div style='font-weight:600;color:#1a1a2e'>"+(h.horseNum||"—")+"</div></div>"
+    +(rd!==h.owner?"<div style='grid-column:1/-1'><div style='font-size:.7rem;color:#999;text-transform:uppercase;letter-spacing:.05em'>Rider</div><div style='font-weight:600;color:#1a1a2e'>"+esc(rd)+(h.riderCownNum?"<span style='font-size:.75rem;color:#aaa;margin-left:6px'>CoWN #"+esc(h.riderCownNum)+"</span>":"")+"</div></div>":"")
+    +(h.licNum?"<div style='grid-column:1/-1'><div style='font-size:.7rem;color:#999;text-transform:uppercase;letter-spacing:.05em'>License #</div><div style='font-weight:600;color:#1a1a2e;font-family:monospace'>"+esc(h.licNum)+"</div></div>":"")
+    +"</div>"
+    +"<div style='border-top:1px solid #e8e0d0;margin-top:.75rem;padding-top:.6rem;font-size:.7rem;color:#aaa;display:flex;justify-content:space-between'>"
+    +"<span>Colorado, Wyoming &amp; Nebraska Stock Horse Association</span><span>www.cownsh.com</span></div></div>";
+}
+
+// ===== MODALS =====
+function showLicenseModal(h){
+  var root=document.getElementById("modal-root");
+  var html="<div class='modal-overlay' id='lic-modal'><div class='modal'>";
+  html+=buildLicenseHTML(h);
+  html+="<div class='btn-row' style='margin-top:1rem'><button class='btn btn-dark' id='lic-close'>Close</button>";
+  html+=" <button class='btn btn-accent' id='lic-print'>&#128424; Print</button>";
+  if(S.adminUnlocked&&h.riderEmail) html+=" <button class='btn btn-green' id='lic-email' data-idx='"+h.rowIndex+"'>&#9993; Send</button>";
+  if(S.adminUnlocked&&!h.riderEmail) html+=" <span style='font-size:.75rem;color:var(--red)'>No email found</span>";
+  html+="</div></div></div>";
+  root.innerHTML=html;
+  document.getElementById("lic-close").addEventListener("click",function(){ root.innerHTML=""; });
+  document.getElementById("lic-modal").addEventListener("click",function(e){ if(e.target===this) root.innerHTML=""; });
+  document.getElementById("lic-print").addEventListener("click",function(){
+    var win=window.open("","","width=600,height=700");
+    win.document.write("<!DOCTYPE html><html><head><link href='https://fonts.googleapis.com/css2?family=Oswald:wght@400;600;700&family=Source+Sans+3:wght@400;600&display=swap' rel='stylesheet'><style>body{font-family:Source Sans 3,sans-serif;padding:2rem;background:#fff}@media print{.license-card{-webkit-print-color-adjust:exact;print-color-adjust:exact}}</style></head><body>");
+    win.document.write(buildLicenseHTML(h)); win.document.write("</body></html>"); win.document.close();
+    setTimeout(function(){ win.print(); },500);
+  });
+  var eb=document.getElementById("lic-email");
+  if(eb) eb.addEventListener("click",function(){ sendLicenseEmail(parseInt(this.dataset.idx),this); });
+}
+
+function showDetailModal(h){
+  var root=document.getElementById("modal-root");
+  var rd=h.rider||h.owner;
+  var html="<div class='modal-overlay' id='det-modal'><div class='modal'>";
+  html+="<h3 style='font-family:Oswald;color:var(--accent)'>"+esc(h.horse)+"</h3>";
+  html+="<table style='margin:.75rem 0;font-size:.85rem'><tbody>";
+  html+="<tr><td style='color:var(--muted);padding-right:1rem'>Owner</td><td>"+esc(h.owner)+"</td></tr>";
+  html+="<tr><td style='color:var(--muted)'>Owner CoWN #</td><td>"+(h.ownerCownNum||"—")+"</td></tr>";
+  html+="<tr><td style='color:var(--muted)'>Rider</td><td>"+esc(rd)+"</td></tr>";
+  html+="<tr><td style='color:var(--muted)'>Rider CoWN #</td><td>"+(h.riderCownNum||"—")+"</td></tr>";
+  html+="<tr><td style='color:var(--muted)'>Send Email To</td><td>"+(h.riderEmail||"<span style='color:var(--red)'>No email found</span>")+"</td></tr>";
+  html+="<tr><td style='color:var(--muted)'>Horse #</td><td>"+(h.horseNum||"—")+"</td></tr>";
+  html+="<tr><td style='color:var(--muted)'>Year</td><td><span class='badge badge-year'>"+h.year+"</span></td></tr>";
+  if(h.licNum) html+="<tr><td style='color:var(--muted)'>License #</td><td><code>"+esc(h.licNum)+"</code></td></tr>";
+  html+="<tr><td style='color:var(--muted)'>Sent</td><td>"+sentBadge(h)+"</td></tr>";
+  html+="</tbody></table>";
+  html+="<div class='btn-row'><button class='btn btn-dark' id='det-close'>Close</button> <button class='btn btn-accent' id='det-view' data-idx='"+h.rowIndex+"'>View License</button></div>";
+  html+="</div></div>";
+  root.innerHTML=html;
+  document.getElementById("det-close").addEventListener("click",function(){ root.innerHTML=""; });
+  document.getElementById("det-modal").addEventListener("click",function(e){ if(e.target===this) root.innerHTML=""; });
+  document.getElementById("det-view").addEventListener("click",function(){ var horse=S.horses.find(function(h){ return h.rowIndex===parseInt(this.dataset.idx); },this); if(horse) showLicenseModal(horse); });
+}
+
+// ===== EMAIL =====
+function sendLicenseEmail(rowIdx,btn){
+  var horse=S.horses.find(function(h){ return h.rowIndex===rowIdx; });
+  if(!horse){ alert("License not found"); return; }
+  if(!horse.riderEmail){ alert("No email address found for this rider."); return; }
+  var orig=btn.textContent; btn.textContent="Sending..."; btn.disabled=true;
+  fetch(CONFIG.proxyUrl+"?action=sendLicense&rowIdx="+rowIdx+"&ts="+Date.now())
+    .then(function(r){ return r.json(); })
+    .then(function(data){
+      if(data.success){ btn.textContent="Sent!"; btn.classList.add("btn-green"); horse.sentStatus="sent"; horse.sentRaw="sent";
+        setTimeout(function(){ btn.textContent=orig; btn.disabled=false; btn.classList.remove("btn-green"); },3000);
+      } else { btn.textContent="Failed"; alert("Error: "+(data.error||"Unknown")); setTimeout(function(){ btn.textContent=orig; btn.disabled=false; },2000); }
+    })
+    .catch(function(e){ btn.textContent="Error"; alert("Network error: "+e.message); setTimeout(function(){ btn.textContent=orig; btn.disabled=false; },2000); });
+}
+function sendBatchLicenses(rowIdxs,btn){
+  var orig=btn.textContent, total=rowIdxs.length, sent=0, failed=0, failedNames=[];
+  btn.disabled=true;
+  function sendNext(i){
+    if(i>=total){
+      btn.textContent="Done! Sent "+sent+"/"+total;
+      if(failed>0) alert(failed+" failed:
+"+failedNames.join("
+"));
+      setTimeout(function(){ btn.textContent=orig; btn.disabled=false; },4000); return;
+    }
+    var idx=rowIdxs[i];
+    var horse=S.horses.find(function(h){ return h.rowIndex===idx; });
+    btn.textContent="Sending "+(i+1)+"/"+total+(horse?" — "+horse.horse:"")+"...";
+    fetch(CONFIG.proxyUrl+"?action=sendLicense&rowIdx="+idx+"&ts="+Date.now())
+      .then(function(r){ return r.json(); })
+      .then(function(data){
+        if(data.success){ sent++; if(horse){ horse.sentStatus="sent"; horse.sentRaw="sent"; } }
+        else { failed++; failedNames.push((horse?horse.horse:"#"+idx)+": "+(data.error||"error")); }
+        setTimeout(function(){ sendNext(i+1); },800);
+      })
+      .catch(function(e){ failed++; failedNames.push((horse?horse.horse:"#"+idx)+": network error"); setTimeout(function(){ sendNext(i+1); },800); });
+  }
+  sendNext(0);
+}
+
+// ===== LOAD =====
+function autoLoad(){
+  showView("loading");
+  fetch(CONFIG.proxyUrl+"?type="+CONFIG.sheetType+"&ts="+Date.now())
+    .then(function(r){ if(!r.ok) throw new Error("HTTP "+r.status); return r.json(); })
+    .then(function(data){
+      if(!data||!data.horses) throw new Error("Bad response from proxy");
+      S.horses=parseHorseJSON(data); showView("lookup");
+    })
+    .catch(function(e){
+      document.getElementById("loading-view").innerHTML="<div class='card'><p class='empty' style='color:var(--red)'>Could not load: "+esc(e.message)+"</p>"
+        +"<div class='btn-row' style='justify-content:center;margin-top:1rem'><button class='btn btn-accent' onclick='autoLoad()'>Retry</button>"
+        +"<label class='btn btn-dark' style='cursor:pointer'>Upload File<input type='file' accept='.xlsx,.xls,.csv' id='fuf' style='display:none'></label></div></div>";
+      var fu=document.getElementById("fuf");
+      if(fu) fu.addEventListener("change",function(e){ var file=e.target.files[0]; if(!file) return; var r=new FileReader(); r.onload=function(ev){ S.horses=parseHorseXLSX(XLSX.read(new Uint8Array(ev.target.result),{type:"array"})); showView("lookup"); }; r.readAsArrayBuffer(file); });
+    });
+}
+
 document.getElementById("hdr-logo").src = LOGO_IMG;
 autoLoad();
 </script>
