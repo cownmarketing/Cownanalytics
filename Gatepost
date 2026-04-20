@@ -1,0 +1,854 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Gatepost — Show Management</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Oswald:wght@400;600;700&family=Source+Sans+3:wght@400;600&display=swap" rel="stylesheet">
+<script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+<style>
+:root{
+  --bg:#0f1923;--card:#1a2733;--card2:#1e2f3d;--accent:#D4A04A;--accent2:#b8863a;
+  --green:#27ae60;--red:#e74c3c;--blue:#2980b9;--purple:#8e44ad;
+  --text:#e8dcc8;--muted:#8a9aad;--border:#2a3a4a;--border2:#354a5e
+}
+*{margin:0;padding:0;box-sizing:border-box}
+body{font-family:'Source Sans 3',sans-serif;background:var(--bg);color:var(--text);min-height:100vh}
+
+/* ── SHELL ── */
+.shell{display:flex;height:100vh;overflow:hidden}
+.sidebar{width:220px;background:var(--card);border-right:1px solid var(--border);display:flex;flex-direction:column;flex-shrink:0}
+.sidebar-logo{padding:1.25rem 1rem 1rem;border-bottom:1px solid var(--border)}
+.sidebar-logo h1{font-family:'Oswald',sans-serif;font-size:1.4rem;font-weight:700;color:var(--accent);letter-spacing:.05em}
+.sidebar-logo span{display:block;font-size:.7rem;color:var(--muted);letter-spacing:.1em;margin-top:2px}
+.show-pill{margin:.75rem;background:var(--card2);border:1px solid var(--border2);border-radius:8px;padding:.6rem .75rem;font-size:.78rem}
+.show-pill .show-name{font-family:'Oswald',sans-serif;color:var(--accent);font-size:.9rem}
+.show-pill .show-meta{color:var(--muted);margin-top:2px}
+.nav{flex:1;padding:.5rem 0;overflow-y:auto}
+.nav-item{display:flex;align-items:center;gap:.6rem;padding:.55rem 1rem;cursor:pointer;color:var(--muted);font-size:.85rem;border-left:3px solid transparent;transition:all .15s}
+.nav-item:hover{color:var(--text);background:rgba(255,255,255,.04)}
+.nav-item.active{color:var(--accent);border-left-color:var(--accent);background:rgba(212,160,74,.08)}
+.nav-item .ico{width:16px;text-align:center;font-size:14px;flex-shrink:0}
+.nav-section{padding:.75rem 1rem .25rem;font-size:.65rem;color:var(--muted);letter-spacing:.1em;text-transform:uppercase}
+.sidebar-footer{padding:.75rem;border-top:1px solid var(--border)}
+.content{flex:1;overflow-y:auto;display:flex;flex-direction:column}
+.topbar{background:var(--card);border-bottom:1px solid var(--border);padding:.6rem 1.25rem;display:flex;align-items:center;gap:1rem;flex-shrink:0}
+.topbar-title{font-family:'Oswald',sans-serif;font-size:1.1rem;color:var(--accent)}
+.topbar-right{margin-left:auto;display:flex;gap:.5rem;align-items:center}
+.page{padding:1.25rem;flex:1}
+
+/* ── CARDS & STATS ── */
+.card{background:var(--card);border:1px solid var(--border);border-radius:10px;padding:1.1rem 1.25rem;margin-bottom:1rem}
+.card-title{font-family:'Oswald',sans-serif;color:var(--accent);font-size:1rem;margin-bottom:.75rem}
+.stat-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(110px,1fr));gap:.75rem;margin-bottom:1rem}
+.stat{background:var(--card2);border:1px solid var(--border2);border-radius:8px;padding:.75rem;text-align:center}
+.stat .n{font-family:'Oswald',sans-serif;font-size:1.9rem;font-weight:700}
+.stat .l{font-size:.72rem;color:var(--muted);margin-top:2px}
+.c-gold .n{color:var(--accent)}
+.c-green .n{color:var(--green)}
+.c-blue .n{color:var(--blue)}
+.c-red .n{color:var(--red)}
+.c-purple .n{color:var(--purple)}
+
+/* ── TABLE ── */
+.tbl-wrap{overflow-x:auto}
+table{width:100%;border-collapse:collapse;font-size:.83rem}
+th{text-align:left;padding:.45rem .6rem;border-bottom:2px solid var(--accent);color:var(--accent);font-family:'Oswald',sans-serif;white-space:nowrap;cursor:pointer;user-select:none}
+th:hover{color:var(--text)}
+td{padding:.45rem .6rem;border-bottom:1px solid var(--border);vertical-align:top}
+tr:hover td{background:rgba(255,255,255,.03)}
+.ctr{text-align:center}
+.bold{font-weight:600}
+.small{font-size:.75rem;color:var(--muted)}
+
+/* ── BADGES ── */
+.badge{display:inline-block;padding:2px 8px;border-radius:10px;font-size:.68rem;font-weight:600;white-space:nowrap}
+.b-gold{background:rgba(212,160,74,.15);color:var(--accent)}
+.b-green{background:rgba(39,174,96,.15);color:#2ecc71}
+.b-red{background:rgba(231,76,60,.15);color:#e74c3c}
+.b-blue{background:rgba(41,128,185,.15);color:#5dade2}
+.b-purple{background:rgba(142,68,173,.15);color:#a569bd}
+.b-gray{background:rgba(138,154,173,.1);color:var(--muted)}
+
+/* ── BUTTONS ── */
+.btn{display:inline-flex;align-items:center;gap:.35rem;padding:.4rem .85rem;border:none;border-radius:6px;cursor:pointer;font-size:.8rem;font-weight:600;font-family:'Source Sans 3',sans-serif;transition:all .15s}
+.btn-accent{background:var(--accent);color:#1a1a1a}
+.btn-accent:hover{background:var(--accent2)}
+.btn-dark{background:var(--card2);color:var(--text);border:1px solid var(--border2)}
+.btn-dark:hover{border-color:var(--accent);color:var(--accent)}
+.btn-green{background:var(--green);color:#fff}
+.btn-red{background:rgba(231,76,60,.15);color:var(--red);border:1px solid rgba(231,76,60,.3)}
+.btn-sm{padding:.25rem .55rem;font-size:.75rem}
+.btn:disabled{opacity:.4;cursor:default}
+.btn-row{display:flex;gap:.5rem;flex-wrap:wrap;margin-bottom:1rem}
+
+/* ── SEARCH & FILTERS ── */
+.search-wrap{position:relative;margin-bottom:.75rem}
+.search-ico{position:absolute;left:.7rem;top:50%;transform:translateY(-50%);color:var(--muted);font-size:.9rem}
+.search-box{width:100%;padding:.55rem .6rem .55rem 2.1rem;border:1px solid var(--border);border-radius:6px;background:var(--bg);color:var(--text);font-size:.85rem}
+.search-box:focus{outline:none;border-color:var(--accent)}
+.pills{display:flex;gap:.35rem;flex-wrap:wrap;margin-bottom:.75rem}
+.pill{background:var(--bg);border:1px solid var(--border);border-radius:20px;padding:.2rem .65rem;font-size:.75rem;cursor:pointer;color:var(--muted);transition:all .15s}
+.pill:hover{color:var(--text)}
+.pill.active{border-color:var(--accent);color:var(--accent);background:rgba(212,160,74,.1)}
+
+/* ── IMPORT DROP ZONE ── */
+.drop-zone{border:2px dashed var(--border2);border-radius:12px;padding:3rem;text-align:center;cursor:pointer;transition:all .2s;background:var(--card2)}
+.drop-zone:hover,.drop-zone.drag{border-color:var(--accent);background:rgba(212,160,74,.05)}
+.drop-zone .ico{font-size:2.5rem;margin-bottom:.75rem;color:var(--muted)}
+.drop-zone h3{font-family:'Oswald',sans-serif;color:var(--accent);font-size:1.2rem;margin-bottom:.35rem}
+.drop-zone p{color:var(--muted);font-size:.85rem}
+.drop-zone input{display:none}
+
+/* ── MODAL ── */
+.modal-bg{position:fixed;inset:0;background:rgba(0,0,0,.75);z-index:200;display:flex;align-items:center;justify-content:center;padding:1rem}
+.modal{background:var(--card);border:1px solid var(--border2);border-radius:12px;padding:1.5rem;max-width:640px;width:100%;max-height:90vh;overflow-y:auto}
+.modal h2{font-family:'Oswald',sans-serif;color:var(--accent);font-size:1.3rem;margin-bottom:1rem}
+.modal-grid{display:grid;grid-template-columns:1fr 1fr;gap:.5rem .75rem;font-size:.85rem;margin-bottom:1rem}
+.modal-grid .lbl{color:var(--muted);font-size:.75rem}
+.modal-grid .val{font-weight:600;margin-top:1px}
+.class-list{display:flex;flex-wrap:wrap;gap:.35rem;margin:.5rem 0}
+.hidden{display:none!important}
+
+/* ── TABS ── */
+.tab-row{display:flex;gap:.2rem;border-bottom:1px solid var(--border);margin-bottom:1rem}
+.tab-btn{background:none;border:none;color:var(--muted);padding:.5rem .85rem;cursor:pointer;font-size:.82rem;font-family:'Oswald',sans-serif;border-bottom:2px solid transparent;margin-bottom:-1px}
+.tab-btn:hover{color:var(--text)}
+.tab-btn.active{color:var(--accent);border-bottom-color:var(--accent)}
+.tab-panel{display:none}
+.tab-panel.active{display:block}
+
+/* ── TAB/PAYMENT ── */
+.tab-line{display:flex;justify-content:space-between;align-items:center;padding:.45rem 0;border-bottom:1px solid var(--border);font-size:.85rem}
+.tab-line:last-child{border:none}
+.tab-total{display:flex;justify-content:space-between;padding:.75rem 0 .25rem;font-weight:600;font-size:1rem;border-top:2px solid var(--border2);margin-top:.5rem}
+.payment-status{display:flex;align-items:center;gap:.75rem;padding:.75rem;background:var(--card2);border-radius:8px;margin-top:.75rem}
+
+/* ── PRINT STYLES ── */
+@media print{
+  .sidebar,.topbar,.btn-row,.pills,.search-wrap,.no-print{display:none!important}
+  .content{overflow:visible}
+  .page{padding:0}
+  body{background:#fff;color:#000}
+  .card{border:1px solid #ccc;break-inside:avoid}
+  table{font-size:11pt}
+  th{background:#f5f5f5;color:#000}
+}
+</style>
+</head>
+<body>
+
+<div class="shell">
+  <!-- SIDEBAR -->
+  <div class="sidebar">
+    <div class="sidebar-logo">
+      <h1>GATEPOST</h1>
+      <span>SHOW MANAGEMENT</span>
+    </div>
+    <div class="show-pill" id="show-pill">
+      <div class="show-name">No show loaded</div>
+      <div class="show-meta">Import a Cognito file to begin</div>
+    </div>
+    <nav class="nav">
+      <div class="nav-section">Show Day</div>
+      <div class="nav-item active" data-page="import"><span class="ico">&#8679;</span> Import Entries</div>
+      <div class="nav-item" data-page="entries"><span class="ico">&#9776;</span> All Entries</div>
+      <div class="nav-item" data-page="classes"><span class="ico">&#127891;</span> Class Lists</div>
+      <div class="nav-item" data-page="tabs"><span class="ico">&#36;</span> Tabs &amp; Payments</div>
+      <div class="nav-item" data-page="stalls"><span class="ico">&#127968;</span> Stalls &amp; RV</div>
+      <div class="nav-section">Results</div>
+      <div class="nav-item" data-page="results"><span class="ico">&#127942;</span> Enter Results</div>
+      <div class="nav-item" data-page="points"><span class="ico">&#9733;</span> Points</div>
+      <div class="nav-section">Print</div>
+      <div class="nav-item" data-page="print"><span class="ico">&#128424;</span> Print Center</div>
+    </nav>
+    <div class="sidebar-footer">
+      <div style="font-size:.72rem;color:var(--muted)">Gatepost v0.1 &mdash; CoWN Edition</div>
+    </div>
+  </div>
+
+  <!-- MAIN CONTENT -->
+  <div class="content">
+    <div class="topbar">
+      <span class="topbar-title" id="page-title">Import Entries</span>
+      <div class="topbar-right" id="topbar-actions"></div>
+    </div>
+    <div class="page" id="page-content"></div>
+  </div>
+</div>
+
+<div id="modal-root"></div>
+
+<script>
+// ═══════════════════════════════════════════════════════
+//  STATE
+// ═══════════════════════════════════════════════════════
+var S = {
+  entries: [],
+  showName: '',
+  currentPage: 'import',
+  payments: {}, // rowIdx -> amount paid
+  backNumbers: {} // rowIdx -> back number
+};
+
+// ═══════════════════════════════════════════════════════
+//  COGNITO PARSER — tuned to CoWN Summerfest format
+// ═══════════════════════════════════════════════════════
+var CLASS_COLS = [
+  [18,'Open'],[20,'Non-Pro'],[22,'Limited'],[24,'Intermediate'],
+  [26,'Novice'],[28,'L1 Novice'],[30,'Youth'],[32,'Novice Youth'],
+  [34,'Open Jr Horse'],[36,'NP Jr Horse'],[38,'Novice Horse'],
+  [42,'Collegiate Non-Pro'],[44,'Collegiate Limited'],[46,'Collegiate Novice']
+];
+
+function parseCognito(wb){
+  var ws = wb.Sheets[wb.SheetNames[0]];
+  var raw = XLSX.utils.sheet_to_json(ws, {header:1, defval:null});
+  var headers = raw[0];
+  var rows = raw.slice(1).filter(function(r){ return r[4]; }); // must have a name
+
+  return rows.map(function(r, i){
+    // Parse order amount and status
+    var orderStr = String(r[3]||'');
+    var amtM = orderStr.match(/\$([\d,]+\.?\d*)/);
+    var amount = amtM ? parseFloat(amtM[1].replace(/,/g,'')) : 0;
+    var paid = orderStr.toLowerCase().indexOf('unpaid') === -1;
+
+    // Parse all classes entered
+    var classes = [];
+    CLASS_COLS.forEach(function(cc){
+      var val = r[cc[0]];
+      if(val && String(val).trim()){
+        String(val).split(',').forEach(function(cls){
+          cls = cls.trim();
+          if(cls){
+            var m = cls.match(/^(\d+)[\s\-–]+(.+)$/);
+            classes.push({
+              num: m ? m[1].trim() : '',
+              name: m ? m[2].trim() : cls,
+              division: cc[1],
+              raw: cls
+            });
+          }
+        });
+      }
+    });
+
+    // Stalling
+    var stall1 = parseInt(r[55])||0;
+    var stall2 = parseInt(r[57])||0;
+    var shavings = parseInt(r[59])||0;
+    var rv1 = parseInt(r[62])||0;
+    var rv2 = parseInt(r[64])||0;
+    var circuitRv = parseInt(r[66])||0;
+
+    return {
+      rowIndex: i,
+      entryNum: r[0],
+      status: r[1],
+      submitted: r[2],
+      name: String(r[4]||'').trim(),
+      address: String(r[5]||'').trim(),
+      phone: String(r[6]||'').trim(),
+      email: String(r[7]||'').trim(),
+      dob: r[8],
+      horse: String(r[9]||'').trim(),
+      horseGender: String(r[10]||'').trim(),
+      horseOwner: String(r[11]||'').trim(),
+      horseDob: r[12],
+      associations: String(r[13]||'').trim(),
+      hasMembership: String(r[14]||'').trim(),
+      memberNum: String(r[15]||'').trim(),
+      needsMembership: String(r[16]||'').trim(),
+      division: String(r[17]||'').trim(),
+      classes: classes,
+      thuTrail: r[49], thuCow: r[50], friTrail: r[51], clinic: r[52],
+      stall1: stall1, stall2: stall2, shavings: shavings,
+      rv1: rv1, rv2: rv2, circuitRv: circuitRv,
+      totalFee: amount,
+      isPaid: paid,
+      cognitoOrder: orderStr
+    };
+  });
+}
+
+// ═══════════════════════════════════════════════════════
+//  TAB BUILDER
+// ═══════════════════════════════════════════════════════
+// Fee structure (CoWN defaults — will be configurable)
+var FEES = {
+  classBase: 30,    // per class
+  cowFee: 15,       // per cow class
+  membership1yr: 60,
+  stall1: 40, stall2: 80, shavings: 12,
+  rv1: 40, rv2: 80, circuitRv: 110
+};
+
+function buildTabLines(entry){
+  var lines = [];
+  // Classes
+  entry.classes.forEach(function(cls){
+    var isCow = cls.name.toLowerCase().indexOf('cow') > -1 || cls.name.toLowerCase().indexOf('cut') > -1;
+    lines.push({
+      desc: 'Class ' + (cls.num||'?') + ' — ' + cls.name + ' (' + cls.division + ')',
+      amount: isCow ? FEES.classBase + FEES.cowFee : FEES.classBase,
+      type: 'class'
+    });
+  });
+  // Membership
+  if(entry.needsMembership && entry.needsMembership !== 'None' && entry.needsMembership.trim()){
+    lines.push({desc:'CoWN Membership (' + entry.needsMembership + ')', amount: FEES.membership1yr, type:'membership'});
+  }
+  // Stalling
+  if(entry.stall1 > 0) lines.push({desc:'Stall — 1 night × ' + entry.stall1, amount: FEES.stall1 * entry.stall1, type:'stall'});
+  if(entry.stall2 > 0) lines.push({desc:'Stall — 2 nights × ' + entry.stall2, amount: FEES.stall2 * entry.stall2, type:'stall'});
+  if(entry.shavings > 0) lines.push({desc:'Shavings — ' + entry.shavings + ' bags', amount: FEES.shavings * entry.shavings, type:'stall'});
+  if(entry.rv1 > 0) lines.push({desc:'RV — 1 night × ' + entry.rv1, amount: FEES.rv1 * entry.rv1, type:'rv'});
+  if(entry.rv2 > 0) lines.push({desc:'RV — 2 nights × ' + entry.rv2, amount: FEES.rv2 * entry.rv2, type:'rv'});
+  if(entry.circuitRv > 0) lines.push({desc:'RV — Circuit × ' + entry.circuitRv, amount: FEES.circuitRv * entry.circuitRv, type:'rv'});
+  return lines;
+}
+
+function tabTotal(entry){
+  return buildTabLines(entry).reduce(function(s,l){ return s + l.amount; }, 0);
+}
+
+// ═══════════════════════════════════════════════════════
+//  HELPERS
+// ═══════════════════════════════════════════════════════
+function esc(s){ return String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
+function fmt$(n){ return '$' + Number(n).toFixed(2).replace(/\B(?=(\d{3})+(?!\d))/g,','); }
+function divBadge(d){
+  var map = {
+    'Open':'b-gold','Non-Pro':'b-blue','Limited':'b-green','Intermediate':'b-purple',
+    'Novice':'b-gray','L1 Novice':'b-gray','Youth':'b-purple','Novice Youth':'b-purple',
+    'Open Jr Horse':'b-gold','NP Jr Horse':'b-blue','Novice Horse':'b-gray'
+  };
+  return '<span class="badge '+(map[d]||'b-gray')+'">'+esc(d)+'</span>';
+}
+function paidBadge(e){
+  var paid = S.payments[e.rowIndex] >= tabTotal(e);
+  return paid ? '<span class="badge b-green">Paid</span>' : '<span class="badge b-red">Balance Due</span>';
+}
+
+// ═══════════════════════════════════════════════════════
+//  NAVIGATION
+// ═══════════════════════════════════════════════════════
+var PAGE_TITLES = {
+  import:'Import Entries', entries:'All Entries', classes:'Class Lists',
+  tabs:'Tabs & Payments', stalls:'Stalls & RV', results:'Enter Results',
+  points:'Points', print:'Print Center'
+};
+
+function showPage(p){
+  S.currentPage = p;
+  document.querySelectorAll('.nav-item').forEach(function(el){
+    el.classList.toggle('active', el.dataset.page === p);
+  });
+  document.getElementById('page-title').textContent = PAGE_TITLES[p]||p;
+  var actions = document.getElementById('topbar-actions');
+  actions.innerHTML = '';
+  if(p !== 'import' && S.entries.length){
+    var b = document.createElement('button');
+    b.className = 'btn btn-dark btn-sm';
+    b.innerHTML = '&#8679; New Import';
+    b.onclick = function(){ showPage('import'); };
+    actions.appendChild(b);
+  }
+  var renders = {
+    import: renderImport, entries: renderEntries, classes: renderClasses,
+    tabs: renderTabs, stalls: renderStalls, results: renderResults,
+    points: renderPoints, print: renderPrint
+  };
+  if(renders[p]) renders[p]();
+}
+
+document.querySelectorAll('.nav-item').forEach(function(el){
+  el.addEventListener('click', function(){ showPage(el.dataset.page); });
+});
+
+// ═══════════════════════════════════════════════════════
+//  PAGE: IMPORT
+// ═══════════════════════════════════════════════════════
+function renderImport(){
+  var pg = document.getElementById('page-content');
+  pg.innerHTML = '<div class="card">'
+    + '<div class="card-title">Load a Cognito Export</div>'
+    + '<div class="drop-zone" id="drop-zone">'
+    + '<div class="ico">&#128190;</div>'
+    + '<h3>Drop your Cognito Excel file here</h3>'
+    + '<p>Or click to browse &mdash; accepts .xlsx files exported from Cognito Forms</p>'
+    + '<input type="file" id="file-inp" accept=".xlsx,.xls">'
+    + '</div>'
+    + '<div id="import-status" style="margin-top:1rem"></div>'
+    + '</div>'
+    + (S.entries.length ? '<div class="card"><div class="card-title">Currently Loaded</div>'
+    + '<p style="color:var(--muted);font-size:.85rem">'+S.entries.length+' entries for <strong style="color:var(--accent)">'+esc(S.showName)+'</strong>. '
+    + '<a href="#" onclick="showPage(\'entries\');return false" style="color:var(--accent)">View entries &rarr;</a></p></div>' : '');
+
+  var dz = document.getElementById('drop-zone');
+  var fi = document.getElementById('file-inp');
+
+  dz.addEventListener('click', function(){ fi.click(); });
+  fi.addEventListener('change', function(e){ if(e.target.files[0]) loadFile(e.target.files[0]); });
+  dz.addEventListener('dragover', function(e){ e.preventDefault(); dz.classList.add('drag'); });
+  dz.addEventListener('dragleave', function(){ dz.classList.remove('drag'); });
+  dz.addEventListener('drop', function(e){
+    e.preventDefault(); dz.classList.remove('drag');
+    if(e.dataTransfer.files[0]) loadFile(e.dataTransfer.files[0]);
+  });
+}
+
+function loadFile(file){
+  var status = document.getElementById('import-status');
+  status.innerHTML = '<span style="color:var(--muted)">Reading file...</span>';
+  var reader = new FileReader();
+  reader.onload = function(e){
+    try{
+      var wb = XLSX.read(new Uint8Array(e.target.result), {type:'array', cellDates:true});
+      S.entries = parseCognito(wb);
+      // Derive show name from file name
+      S.showName = file.name.replace(/\.xlsx?$/i,'').replace(/[-_]/g,' ');
+      // Init payments
+      S.payments = {};
+      S.entries.forEach(function(en){
+        S.payments[en.rowIndex] = en.isPaid ? tabTotal(en) : 0;
+      });
+      // Update sidebar
+      document.getElementById('show-pill').innerHTML =
+        '<div class="show-name">'+esc(S.showName)+'</div>'
+        +'<div class="show-meta">'+S.entries.length+' entries &middot; '
+        +S.entries.filter(function(e){ return e.classes.length>0; }).length+' with classes</div>';
+      status.innerHTML = '<span style="color:var(--green)">&#10003; Loaded '+S.entries.length+' entries successfully.</span>';
+      setTimeout(function(){ showPage('entries'); }, 800);
+    } catch(err){
+      status.innerHTML = '<span style="color:var(--red)">Error: '+esc(err.message)+'</span>';
+    }
+  };
+  reader.readAsArrayBuffer(file);
+}
+
+// ═══════════════════════════════════════════════════════
+//  PAGE: ALL ENTRIES
+// ═══════════════════════════════════════════════════════
+function renderEntries(){
+  var pg = document.getElementById('page-content');
+  if(!S.entries.length){ pg.innerHTML='<div class="card"><p class="empty" style="color:var(--muted);text-align:center;padding:2rem">No entries loaded. <a href="#" onclick="showPage(\'import\');return false" style="color:var(--accent)">Import a file</a></p></div>'; return; }
+
+  // Stats
+  var totalFees = S.entries.reduce(function(s,e){ return s+tabTotal(e); },0);
+  var paidAmt = Object.values(S.payments).reduce(function(s,v){ return s+v; },0);
+  var divs = {};
+  S.entries.forEach(function(e){ if(e.division) divs[e.division]=(divs[e.division]||0)+1; });
+  var uniqueRiders = new Set(S.entries.map(function(e){ return e.name; })).size;
+
+  pg.innerHTML = '<div class="stat-grid">'
+    + '<div class="stat c-gold"><div class="n">'+S.entries.length+'</div><div class="l">Total Entries</div></div>'
+    + '<div class="stat c-blue"><div class="n">'+uniqueRiders+'</div><div class="l">Unique Riders</div></div>'
+    + '<div class="stat c-green"><div class="n">'+fmt$(totalFees)+'</div><div class="l">Total Fees</div></div>'
+    + '<div class="stat c-red"><div class="n">'+fmt$(totalFees-paidAmt)+'</div><div class="l">Outstanding</div></div>'
+    + '</div>'
+    + '<div class="card">'
+    + '<div class="btn-row"><button class="btn btn-accent btn-sm" onclick="window.print()">&#128424; Print List</button></div>'
+    + '<div class="search-wrap"><span class="search-ico">&#128269;</span><input class="search-box" id="entry-q" placeholder="Search rider, horse, division..."></div>'
+    + '<div class="pills" id="div-pills"></div>'
+    + '<div class="tbl-wrap" id="entry-tbl"></div></div>';
+
+  // Division pills
+  var allDivs = Object.keys(divs).sort();
+  var pillsEl = document.getElementById('div-pills');
+  var activePill = 'All';
+  var pills = ['All'].concat(allDivs);
+  function makePills(){
+    pillsEl.innerHTML = pills.map(function(d){
+      return '<button class="pill'+(d===activePill?' active':'')+'">'+d+(divs[d]?' ('+divs[d]+')':'')+'</button>';
+    }).join('');
+    pillsEl.querySelectorAll('.pill').forEach(function(b,i){
+      b.addEventListener('click',function(){ activePill=pills[i]; makePills(); renderEntryTable(); });
+    });
+  }
+  makePills();
+
+  function renderEntryTable(){
+    var q = document.getElementById('entry-q').value.trim().toLowerCase();
+    var list = S.entries.filter(function(e){
+      var divOk = activePill==='All' || e.division===activePill;
+      var qOk = !q || (e.name||'').toLowerCase().indexOf(q)>-1
+        || (e.horse||'').toLowerCase().indexOf(q)>-1
+        || (e.division||'').toLowerCase().indexOf(q)>-1
+        || (e.memberNum||'').toLowerCase().indexOf(q)>-1;
+      return divOk && qOk;
+    });
+    var t = '<table><thead><tr><th>#</th><th>Rider</th><th>Horse</th><th>Division</th><th>Classes</th><th>Fees</th><th>Status</th><th></th></tr></thead><tbody>';
+    if(!list.length) t += '<tr><td colspan="8" style="text-align:center;color:var(--muted);padding:1.5rem">No entries match</td></tr>';
+    list.forEach(function(e){
+      var bn = S.backNumbers[e.rowIndex] || '—';
+      t += '<tr>'
+        +'<td class="ctr small">'+esc(String(bn))+'</td>'
+        +'<td><div class="bold">'+esc(e.name)+'</div><div class="small">'+esc(e.memberNum||'No # on file')+'</div></td>'
+        +'<td><div>'+esc(e.horse)+'</div><div class="small">'+esc(e.horseGender)+'</div></td>'
+        +'<td>'+divBadge(e.division)+'</td>'
+        +'<td class="small">'+e.classes.map(function(c){ return '<span class="badge b-gray" style="margin:1px">'+esc(c.num)+'</span>'; }).join(' ')+'</td>'
+        +'<td class="bold">'+fmt$(tabTotal(e))+'</td>'
+        +'<td>'+paidBadge(e)+'</td>'
+        +'<td><button class="btn btn-dark btn-sm" onclick="showEntryModal('+e.rowIndex+')">View</button></td>'
+        +'</tr>';
+    });
+    t += '</tbody></table>';
+    document.getElementById('entry-tbl').innerHTML = t;
+  }
+  renderEntryTable();
+  document.getElementById('entry-q').addEventListener('input', renderEntryTable);
+}
+
+// ═══════════════════════════════════════════════════════
+//  PAGE: CLASS LISTS
+// ═══════════════════════════════════════════════════════
+function renderClasses(){
+  var pg = document.getElementById('page-content');
+  if(!S.entries.length){ pg.innerHTML='<div class="card"><p style="color:var(--muted);text-align:center;padding:2rem">No entries loaded.</p></div>'; return; }
+
+  // Build class map: classNum -> {name, division, entries[]}
+  var classMap = {};
+  S.entries.forEach(function(e){
+    e.classes.forEach(function(cls){
+      var key = cls.num || cls.name;
+      if(!classMap[key]) classMap[key] = {num:cls.num, name:cls.name, division:cls.division, entries:[]};
+      classMap[key].entries.push(e);
+    });
+  });
+
+  var sorted = Object.values(classMap).sort(function(a,b){
+    return (parseInt(a.num)||999) - (parseInt(b.num)||999);
+  });
+
+  pg.innerHTML = '<div class="btn-row no-print">'
+    +'<button class="btn btn-accent btn-sm" onclick="window.print()">&#128424; Print All Class Lists</button>'
+    +'</div>'
+    +'<div id="class-list-content"></div>';
+
+  var html = '';
+  sorted.forEach(function(cls){
+    html += '<div class="card" style="break-inside:avoid">'
+      +'<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:.6rem">'
+      +'<div><span style="font-family:Oswald;font-size:1.1rem;color:var(--accent)">Class '+esc(cls.num)+' &mdash; '+esc(cls.name)+'</span>'
+      +' '+divBadge(cls.division)+'</div>'
+      +'<span class="badge b-blue">'+cls.entries.length+' entries</span>'
+      +'</div>'
+      +'<table><thead><tr><th>Back #</th><th>Rider</th><th>Horse</th><th>CoWN #</th></tr></thead><tbody>';
+    cls.entries.forEach(function(e){
+      var bn = S.backNumbers[e.rowIndex] || '—';
+      html += '<tr><td class="bold ctr">'+esc(String(bn))+'</td>'
+        +'<td>'+esc(e.name)+'</td>'
+        +'<td>'+esc(e.horse)+'</td>'
+        +'<td class="small">'+esc(e.memberNum||'—')+'</td></tr>';
+    });
+    html += '</tbody></table></div>';
+  });
+  document.getElementById('class-list-content').innerHTML = html;
+}
+
+// ═══════════════════════════════════════════════════════
+//  PAGE: TABS & PAYMENTS
+// ═══════════════════════════════════════════════════════
+function renderTabs(){
+  var pg = document.getElementById('page-content');
+  if(!S.entries.length){ pg.innerHTML='<div class="card"><p style="color:var(--muted);text-align:center;padding:2rem">No entries loaded.</p></div>'; return; }
+
+  var totalOwed = S.entries.reduce(function(s,e){ return s+tabTotal(e); },0);
+  var totalPaid = Object.values(S.payments).reduce(function(s,v){ return s+(v||0); },0);
+  var outstanding = totalOwed - totalPaid;
+  var fullyPaid = S.entries.filter(function(e){ return (S.payments[e.rowIndex]||0) >= tabTotal(e); }).length;
+
+  pg.innerHTML = '<div class="stat-grid">'
+    +'<div class="stat c-green"><div class="n">'+fmt$(totalOwed)+'</div><div class="l">Total Owed</div></div>'
+    +'<div class="stat c-blue"><div class="n">'+fmt$(totalPaid)+'</div><div class="l">Collected</div></div>'
+    +'<div class="stat c-red"><div class="n">'+fmt$(outstanding)+'</div><div class="l">Outstanding</div></div>'
+    +'<div class="stat c-gold"><div class="n">'+fullyPaid+'/'+S.entries.length+'</div><div class="l">Fully Paid</div></div>'
+    +'</div>'
+    +'<div class="card">'
+    +'<div class="search-wrap"><span class="search-ico">&#128269;</span><input class="search-box" id="tab-q" placeholder="Search rider..."></div>'
+    +'<div class="pills" id="tab-pills"></div>'
+    +'<div class="tbl-wrap" id="tab-tbl"></div></div>';
+
+  var tabFilter = 'All';
+  var tabPills = document.getElementById('tab-pills');
+
+  function makePills(){
+    ['All','Outstanding','Paid'].forEach(function(f){
+      var b = document.createElement('button');
+      b.className = 'pill'+(f===tabFilter?' active':'');
+      b.textContent = f;
+      b.onclick = function(){ tabFilter=f; makePills(); renderTabTable(); };
+      tabPills.appendChild(b);
+    });
+  }
+  makePills();
+
+  function renderTabTable(){
+    var q = (document.getElementById('tab-q')||{value:''}).value.trim().toLowerCase();
+    var list = S.entries.filter(function(e){
+      var paid = (S.payments[e.rowIndex]||0) >= tabTotal(e);
+      var fOk = tabFilter==='All' || (tabFilter==='Paid'&&paid) || (tabFilter==='Outstanding'&&!paid);
+      var qOk = !q || (e.name||'').toLowerCase().indexOf(q)>-1 || (e.horse||'').toLowerCase().indexOf(q)>-1;
+      return fOk && qOk;
+    });
+
+    // Group by rider name
+    var byRider = {};
+    list.forEach(function(e){
+      if(!byRider[e.name]) byRider[e.name] = [];
+      byRider[e.name].push(e);
+    });
+
+    var t = '<table><thead><tr><th>Rider</th><th>Entries</th><th>Owed</th><th>Paid</th><th>Balance</th><th>Status</th><th></th></tr></thead><tbody>';
+    Object.keys(byRider).sort().forEach(function(name){
+      var entries = byRider[name];
+      var owed = entries.reduce(function(s,e){ return s+tabTotal(e); },0);
+      var paid = entries.reduce(function(s,e){ return s+(S.payments[e.rowIndex]||0); },0);
+      var bal = owed - paid;
+      var isPaid = bal <= 0;
+      t += '<tr>'
+        +'<td class="bold">'+esc(name)+'</td>'
+        +'<td class="small ctr">'+entries.length+'</td>'
+        +'<td>'+fmt$(owed)+'</td>'
+        +'<td style="color:var(--green)">'+fmt$(paid)+'</td>'
+        +'<td class="bold" style="color:'+(isPaid?'var(--green)':'var(--red)')+'">'+fmt$(bal)+'</td>'
+        +'<td>'+(isPaid?'<span class="badge b-green">Paid</span>':'<span class="badge b-red">Due</span>')+'</td>'
+        +'<td><button class="btn btn-accent btn-sm" onclick="showTabModal(\''+esc(name.replace(/'/g,"\\'"))+'\')">'
+        +(isPaid?'Receipt':'Pay')+'</button></td>'
+        +'</tr>';
+    });
+    t += '</tbody></table>';
+    document.getElementById('tab-tbl').innerHTML = t;
+  }
+  renderTabTable();
+  document.getElementById('tab-q').addEventListener('input', renderTabTable);
+}
+
+// ═══════════════════════════════════════════════════════
+//  PAGE: STALLS & RV
+// ═══════════════════════════════════════════════════════
+function renderStalls(){
+  var pg = document.getElementById('page-content');
+  if(!S.entries.length){ pg.innerHTML='<div class="card"><p style="color:var(--muted);text-align:center;padding:2rem">No entries loaded.</p></div>'; return; }
+
+  var stalled = S.entries.filter(function(e){ return e.stall1>0||e.stall2>0; });
+  var rvEntries = S.entries.filter(function(e){ return e.rv1>0||e.rv2>0||e.circuitRv>0; });
+  var totalShavings = S.entries.reduce(function(s,e){ return s+e.shavings; },0);
+  var stallRevenue = S.entries.reduce(function(s,e){
+    return s + e.stall1*FEES.stall1 + e.stall2*FEES.stall2 + e.shavings*FEES.shavings;
+  },0);
+  var rvRevenue = S.entries.reduce(function(s,e){
+    return s + e.rv1*FEES.rv1 + e.rv2*FEES.rv2 + e.circuitRv*FEES.circuitRv;
+  },0);
+
+  pg.innerHTML = '<div class="stat-grid">'
+    +'<div class="stat c-gold"><div class="n">'+stalled.length+'</div><div class="l">Stalled Riders</div></div>'
+    +'<div class="stat c-blue"><div class="n">'+totalShavings+'</div><div class="l">Bags Shavings</div></div>'
+    +'<div class="stat c-purple"><div class="n">'+rvEntries.length+'</div><div class="l">RV Spots</div></div>'
+    +'<div class="stat c-green"><div class="n">'+fmt$(stallRevenue+rvRevenue)+'</div><div class="l">Housing Revenue</div></div>'
+    +'</div>'
+    +'<div class="card"><div class="card-title">Stall List</div>'
+    +'<div class="tbl-wrap">'
+    +'<table><thead><tr><th>Rider</th><th>Horse</th><th>Stalls</th><th>Shavings</th><th>Arrival</th><th>Fees</th></tr></thead><tbody>'
+    + stalled.map(function(e){
+      var stalls = (e.stall1?e.stall1+'× 1-night ':'')+(e.stall2?e.stall2+'× 2-night':'');
+      var fee = e.stall1*FEES.stall1+e.stall2*FEES.stall2+e.shavings*FEES.shavings;
+      return '<tr><td class="bold">'+esc(e.name)+'</td><td>'+esc(e.horse)+'</td>'
+        +'<td>'+esc(stalls)+'</td><td class="ctr">'+e.shavings+'</td>'
+        +'<td class="small">'+esc(String(e.stallingArrival||e.submitted||''))+'</td>'
+        +'<td>'+fmt$(fee)+'</td></tr>';
+    }).join('')
+    +'</tbody></table></div></div>'
+    +'<div class="card"><div class="card-title">RV List</div>'
+    +'<div class="tbl-wrap">'
+    +'<table><thead><tr><th>Rider</th><th>Type</th><th>Nights</th><th>Fees</th></tr></thead><tbody>'
+    + rvEntries.map(function(e){
+      var type = e.circuitRv>0?'Circuit':e.rv2>0?'2-Night':'1-Night';
+      var nights = e.rv1||e.rv2||e.circuitRv;
+      var fee = e.rv1*FEES.rv1+e.rv2*FEES.rv2+e.circuitRv*FEES.circuitRv;
+      return '<tr><td class="bold">'+esc(e.name)+'</td><td>'+type+'</td><td class="ctr">'+nights+'</td><td>'+fmt$(fee)+'</td></tr>';
+    }).join('')
+    +'</tbody></table></div></div>';
+}
+
+// ═══════════════════════════════════════════════════════
+//  PAGE: RESULTS (placeholder for now)
+// ═══════════════════════════════════════════════════════
+function renderResults(){
+  document.getElementById('page-content').innerHTML = '<div class="card">'
+    +'<div class="card-title">Enter Results</div>'
+    +'<p style="color:var(--muted);font-size:.85rem">Select a class, then enter placings as the class runs. Points will calculate automatically.</p>'
+    +'<div style="margin-top:1.5rem;padding:2rem;border:1px dashed var(--border2);border-radius:8px;text-align:center;color:var(--muted)">'
+    +'<div style="font-size:1.5rem;margin-bottom:.5rem">&#127942;</div>'
+    +'<div style="font-family:Oswald;font-size:1rem;color:var(--accent)">Coming in next build</div>'
+    +'<div style="font-size:.82rem;margin-top:.35rem">Class-by-class results entry with auto points calculation</div>'
+    +'</div></div>';
+}
+
+function renderPoints(){
+  document.getElementById('page-content').innerHTML = '<div class="card">'
+    +'<div class="card-title">Points Standings</div>'
+    +'<div style="margin-top:1.5rem;padding:2rem;border:1px dashed var(--border2);border-radius:8px;text-align:center;color:var(--muted)">'
+    +'<div style="font-size:1.5rem;margin-bottom:.5rem">&#9733;</div>'
+    +'<div style="font-family:Oswald;font-size:1rem;color:var(--accent)">Coming in next build</div>'
+    +'<div style="font-size:.82rem;margin-top:.35rem">Live standings, year-end totals, qualifier tracking</div>'
+    +'</div></div>';
+}
+
+// ═══════════════════════════════════════════════════════
+//  PAGE: PRINT CENTER
+// ═══════════════════════════════════════════════════════
+function renderPrint(){
+  var pg = document.getElementById('page-content');
+  pg.innerHTML = '<div class="card"><div class="card-title">Print Center</div>'
+    +'<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:.75rem">'
+    +printOption('Class Lists','Print all class lists with back numbers','&#128441;','renderClasses')
+    +printOption('Entry Summary','All entries, one per row','&#9776;','renderEntries')
+    +printOption('Stall List','All stalling and RV assignments','&#127968;','renderStalls')
+    +printOption('Tab Sheet','All rider tabs with balances','&#36;','renderTabs')
+    +'</div></div>';
+}
+
+function printOption(title, desc, ico, page){
+  return '<div style="background:var(--card2);border:1px solid var(--border2);border-radius:8px;padding:1rem;cursor:pointer" '
+    +'onclick="showPage(\''+page.replace('render','').toLowerCase()+'\');setTimeout(function(){window.print();},300)">'
+    +'<div style="font-size:1.4rem;margin-bottom:.4rem">'+ico+'</div>'
+    +'<div style="font-family:Oswald;color:var(--accent);font-size:.95rem">'+title+'</div>'
+    +'<div style="font-size:.78rem;color:var(--muted);margin-top:.25rem">'+desc+'</div>'
+    +'</div>';
+}
+
+// ═══════════════════════════════════════════════════════
+//  MODALS
+// ═══════════════════════════════════════════════════════
+function showEntryModal(rowIdx){
+  var e = S.entries.find(function(x){ return x.rowIndex===rowIdx; });
+  if(!e) return;
+  var lines = buildTabLines(e);
+  var total = tabTotal(e);
+  var paid = S.payments[e.rowIndex]||0;
+  var bal = total - paid;
+
+  var html = '<div class="modal-bg" id="entry-modal">'
+    +'<div class="modal">'
+    +'<h2>'+esc(e.name)+'</h2>'
+    +'<div class="tab-row">'
+    +'<button class="tab-btn active" onclick="switchTab(this,\'detail\')">Details</button>'
+    +'<button class="tab-btn" onclick="switchTab(this,\'tab\')">Tab</button>'
+    +'</div>'
+    // Detail panel
+    +'<div class="tab-panel active" id="tp-detail">'
+    +'<div class="modal-grid">'
+    +'<div><div class="lbl">Horse</div><div class="val">'+esc(e.horse)+'</div></div>'
+    +'<div><div class="lbl">Division</div><div class="val">'+divBadge(e.division)+'</div></div>'
+    +'<div><div class="lbl">CoWN #</div><div class="val">'+esc(e.memberNum||'—')+'</div></div>'
+    +'<div><div class="lbl">Email</div><div class="val small">'+esc(e.email)+'</div></div>'
+    +'<div><div class="lbl">Phone</div><div class="val">'+esc(e.phone)+'</div></div>'
+    +'<div><div class="lbl">Back #</div><div class="val">'
+    +'<input type="number" id="bn-inp" value="'+(S.backNumbers[rowIdx]||'')+'" '
+    +'style="background:var(--bg);border:1px solid var(--border);color:var(--text);padding:3px 8px;border-radius:4px;width:80px" '
+    +'onchange="S.backNumbers['+rowIdx+']=this.value">'
+    +'</div></div>'
+    +'</div>'
+    +'<div style="font-size:.8rem;color:var(--muted);margin-bottom:.35rem">Classes entered:</div>'
+    +'<div class="class-list">'
+    + e.classes.map(function(c){ return '<span class="badge b-gray">'+esc(c.num)+' &mdash; '+esc(c.name)+'</span>'; }).join(' ')
+    +'</div>'
+    +(e.stall1||e.stall2||e.shavings||e.rv1||e.rv2||e.circuitRv
+      ? '<div style="font-size:.8rem;color:var(--muted);margin:.75rem 0 .35rem">Housing:</div>'
+      +'<div class="small" style="color:var(--text)">'
+      +(e.stall1?'<span class="badge b-gold">'+e.stall1+'× stall 1-night</span> ':'')
+      +(e.stall2?'<span class="badge b-gold">'+e.stall2+'× stall 2-night</span> ':'')
+      +(e.shavings?'<span class="badge b-gold">'+e.shavings+' shavings</span> ':'')
+      +(e.rv1?'<span class="badge b-blue">'+e.rv1+'× RV 1-night</span> ':'')
+      +(e.rv2?'<span class="badge b-blue">'+e.rv2+'× RV 2-night</span> ':'')
+      +(e.circuitRv?'<span class="badge b-blue">Circuit RV</span> ':'')
+      +'</div>' : '')
+    +'</div>'
+    // Tab panel
+    +'<div class="tab-panel" id="tp-tab">'
+    + lines.map(function(l){
+      return '<div class="tab-line"><span>'+esc(l.desc)+'</span><span>'+fmt$(l.amount)+'</span></div>';
+    }).join('')
+    +'<div class="tab-total"><span>Total</span><span>'+fmt$(total)+'</span></div>'
+    +'<div class="payment-status">'
+    +'<div style="flex:1"><div class="small">Paid</div><div class="bold" style="color:var(--green)">'+fmt$(paid)+'</div></div>'
+    +'<div style="flex:1"><div class="small">Balance</div><div class="bold" style="color:'+(bal<=0?'var(--green)':'var(--red)')+'">'+fmt$(bal)+'</div></div>'
+    +'<div>'
+    +(bal>0?'<button class="btn btn-green btn-sm" onclick="recordPayment('+rowIdx+','+total+')">Mark Paid</button>':'<span class="badge b-green">&#10003; Paid in full</span>')
+    +'</div></div>'
+    +'</div>'
+    // Footer
+    +'<div class="btn-row" style="margin-top:1rem;margin-bottom:0">'
+    +'<button class="btn btn-dark" onclick="closeModal()">Close</button>'
+    +'<button class="btn btn-accent btn-sm" onclick="showTabModal(\''+esc(e.name.replace(/'/g,"\\'"))+'\')">Full Tab</button>'
+    +'</div>'
+    +'</div></div>';
+
+  document.getElementById('modal-root').innerHTML = html;
+  document.getElementById('entry-modal').addEventListener('click',function(ev){ if(ev.target===this) closeModal(); });
+}
+
+function showTabModal(name){
+  var entries = S.entries.filter(function(e){ return e.name===name; });
+  if(!entries.length) return;
+  var allLines = [];
+  entries.forEach(function(e){ buildTabLines(e).forEach(function(l){ allLines.push(l); }); });
+  var total = allLines.reduce(function(s,l){ return s+l.amount; },0);
+  var paid = entries.reduce(function(s,e){ return s+(S.payments[e.rowIndex]||0); },0);
+  var bal = total - paid;
+
+  var html = '<div class="modal-bg" id="tab-modal">'
+    +'<div class="modal">'
+    +'<h2>'+esc(name)+'</h2>'
+    +'<div class="small" style="color:var(--muted);margin-bottom:1rem">'+esc(entries[0].email)+' &middot; '+esc(entries[0].phone)+'</div>'
+    + allLines.map(function(l){
+      return '<div class="tab-line"><span>'+esc(l.desc)+'</span><span>'+fmt$(l.amount)+'</span></div>';
+    }).join('')
+    +'<div class="tab-total"><span>Total</span><span>'+fmt$(total)+'</span></div>'
+    +'<div class="payment-status">'
+    +'<div style="flex:1"><div class="small">Paid</div><div class="bold" style="color:var(--green)">'+fmt$(paid)+'</div></div>'
+    +'<div style="flex:1"><div class="small">Balance</div><div class="bold" style="color:'+(bal<=0?'var(--green)':'var(--red)')+'">'+fmt$(bal)+'</div></div>'
+    +'<div>'+(bal>0?'<button class="btn btn-green btn-sm" onclick="recordPaymentByName(\''+esc(name.replace(/'/g,"\\'"))+'\','+total+')">Mark Paid</button>':'<span class="badge b-green">&#10003; Paid</span>')+'</div>'
+    +'</div>'
+    +'<div class="btn-row" style="margin-top:1rem;margin-bottom:0">'
+    +'<button class="btn btn-dark" onclick="closeModal()">Close</button>'
+    +'<button class="btn btn-accent btn-sm no-print" onclick="window.print()">&#128424; Print Receipt</button>'
+    +'</div></div></div>';
+
+  document.getElementById('modal-root').innerHTML = html;
+  document.getElementById('tab-modal').addEventListener('click',function(ev){ if(ev.target===this) closeModal(); });
+}
+
+function recordPayment(rowIdx, amount){
+  S.payments[rowIdx] = amount;
+  closeModal();
+  renderTabs();
+}
+function recordPaymentByName(name, amount){
+  S.entries.filter(function(e){ return e.name===name; }).forEach(function(e){
+    S.payments[e.rowIndex] = amount / S.entries.filter(function(x){ return x.name===name; }).length;
+  });
+  closeModal();
+  renderTabs();
+}
+
+function closeModal(){ document.getElementById('modal-root').innerHTML=''; }
+
+function switchTab(btn, panel){
+  btn.closest('.modal').querySelectorAll('.tab-btn').forEach(function(b){ b.classList.remove('active'); });
+  btn.closest('.modal').querySelectorAll('.tab-panel').forEach(function(p){ p.classList.remove('active'); });
+  btn.classList.add('active');
+  document.getElementById('tp-'+panel).classList.add('active');
+}
+
+// ═══════════════════════════════════════════════════════
+//  BOOT
+// ═══════════════════════════════════════════════════════
+showPage('import');
+</script>
+</body>
+</html>
