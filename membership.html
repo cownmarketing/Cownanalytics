@@ -888,6 +888,27 @@ function parsePublicHorses(data){
   raw.forEach(function(h){ h.ownerEmail=""; h.riderEmail=""; h.sentStatus=""; h.sentRaw=""; });
   return raw.sort(function(a,b){ return (a.owner||"").localeCompare(b.owner||"")||(a.horse||"").localeCompare(b.horse||""); });
 }
+function parseMemberJSON(data){
+  var raw=(data&&data.members)||[];
+  var now=new Date();
+  return raw.map(function(m){
+    var expDate=parseDate(m.expDate);
+    var renewDate=parseDate(m.renewDate);
+    var daysToExp=expDate?daysBetween(now,expDate):null;
+    var status=m.status||"Lapsed";
+    var expiring=status==="Active"&&daysToExp!==null&&daysToExp<=60;
+    var rawSent=m.sentRaw||"";
+    return {
+      first:m.first||"", last:m.last||"", fullName:(m.first||"")+" "+(m.last||""),
+      cownNum:parseInt(m.cownNum)||0, type:m.type||"General", status:status,
+      duration:m.duration||1, renewDate:renewDate, expDate:expDate, daysToExp:daysToExp, expiring:expiring,
+      email:m.email||"", phone:m.phone||"", address:m.address||"", city:m.city||"", state:m.state||"", zip:m.zip||"",
+      sentStatus:parseSentStatus(rawSent), sentRaw:rawSent,
+      youthDOB:m.youthDOB||"", age:m.age||"", l1Status:m.l1Status||"",
+      method:m.method||""
+    };
+  }).sort(function(a,b){ return a.last.localeCompare(b.last)||a.first.localeCompare(b.first); });
+}
 
 function loadHorses(){
   fetch(CONFIG.emailProxyUrl+"?type=horseDirectory&ts="+Date.now())
@@ -898,24 +919,24 @@ function loadHorses(){
 
 // Full load (password required): fetches the real spreadsheet + emails, only
 // called after ?action=verifyPassword confirms the password server-side.
-function loadFullAdminData(pwd){
-  var memberFetch=fetch(CONFIG.proxyUrl+"?type=membership&pwd="+encodeURIComponent(pwd)+"&ts="+Date.now())
-    .then(function(r){ if(!r.ok) throw new Error("HTTP "+r.status); return r.text(); })
-    .then(function(b64){
-      if(b64.trim().charAt(0)==='{'){
-        var errMsg="Unexpected response from server";
-        try{ var errObj=JSON.parse(b64); if(errObj&&errObj.error) errMsg=errObj.error; }catch(e){}
-        throw new Error(errMsg);
-      }
-      var bin=atob(b64);
-      var arr=new Uint8Array(bin.length);
-      for(var i=0;i<bin.length;i++) arr[i]=bin.charCodeAt(i);
-      var wb=XLSX.read(arr,{type:"array"});
-      S.members=parseMemberData(wb);
+function _fetchAdminJSON(label,url){
+  return fetch(url).then(function(r){
+    return r.text().then(function(txt){
+      console.log("["+label+"] HTTP "+r.status+" raw response:",txt);
+      if(!r.ok) throw new Error(label+": HTTP "+r.status);
+      var data;
+      try{ data=JSON.parse(txt); }
+      catch(e){ throw new Error(label+": server did not return JSON — see console for the raw response"); }
+      if(!data||data.error) throw new Error(label+": "+((data&&data.error)||"Unauthorized"));
+      return data;
     });
-  var horseFetch=fetch(CONFIG.emailProxyUrl+"?type=horse&pwd="+encodeURIComponent(pwd)+"&ts="+Date.now())
-    .then(function(r){ if(!r.ok) throw new Error("HTTP "+r.status); return r.json(); })
-    .then(function(data){ if(!data||data.error) throw new Error((data&&data.error)||"Unauthorized"); S.horses=parseHorseJSON(data); });
+  });
+}
+function loadFullAdminData(pwd){
+  var memberFetch=_fetchAdminJSON("membership",CONFIG.proxyUrl+"?type=membership&pwd="+encodeURIComponent(pwd)+"&ts="+Date.now())
+    .then(function(data){ S.members=parseMemberJSON(data); });
+  var horseFetch=_fetchAdminJSON("horse",CONFIG.emailProxyUrl+"?type=horse&pwd="+encodeURIComponent(pwd)+"&ts="+Date.now())
+    .then(function(data){ S.horses=parseHorseJSON(data); });
   return Promise.all([memberFetch,horseFetch]);
 }
 
