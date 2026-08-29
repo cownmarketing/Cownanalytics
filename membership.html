@@ -902,6 +902,11 @@ function loadFullAdminData(pwd){
   var memberFetch=fetch(CONFIG.proxyUrl+"?type=membership&pwd="+encodeURIComponent(pwd)+"&ts="+Date.now())
     .then(function(r){ if(!r.ok) throw new Error("HTTP "+r.status); return r.text(); })
     .then(function(b64){
+      if(b64.trim().charAt(0)==='{'){
+        var errMsg="Unexpected response from server";
+        try{ var errObj=JSON.parse(b64); if(errObj&&errObj.error) errMsg=errObj.error; }catch(e){}
+        throw new Error(errMsg);
+      }
       var bin=atob(b64);
       var arr=new Uint8Array(bin.length);
       for(var i=0;i<bin.length;i++) arr[i]=bin.charCodeAt(i);
