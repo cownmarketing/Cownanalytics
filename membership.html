@@ -48,6 +48,7 @@ td{padding:.5rem;border-bottom:1px solid var(--border)}
 .badge-sent{background:rgba(39,174,96,.1);color:var(--green)}
 .badge-renew{background:rgba(41,128,185,.15);color:var(--blue)}
 .badge-none{background:rgba(136,136,136,.1);color:var(--muted)}
+.badge-year{background:rgba(212,160,74,.15);color:var(--accent)}
 .btn{display:inline-block;padding:.4rem .8rem;border:none;border-radius:6px;cursor:pointer;font-size:.8rem;font-weight:600;font-family:'Source Sans 3',sans-serif}
 .btn-accent{background:var(--accent);color:#1a1a1a}
 .btn-dark{background:var(--bg);color:var(--text);border:1px solid var(--border)}
@@ -72,7 +73,8 @@ td{padding:.5rem;border-bottom:1px solid var(--border)}
 .renewal-group h3{font-family:'Oswald',sans-serif;font-size:1rem;margin-bottom:.5rem}
 .renewal-group.urgent h3{color:var(--red)}
 .renewal-group.warning h3{color:var(--accent)}
-@media print{body{background:#fff;color:#000}.mem-card{-webkit-print-color-adjust:exact;print-color-adjust:exact}}
+.email-chip{display:inline-block;background:rgba(41,128,185,.15);color:#5dade2;border:1px solid rgba(41,128,185,.3);border-radius:4px;padding:2px 7px;font-size:.75rem;font-family:monospace;max-width:180px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;vertical-align:middle}
+@media print{body{background:#fff;color:#000}.mem-card,.license-card{-webkit-print-color-adjust:exact;print-color-adjust:exact}}
 </style>
 </head>
 <body>
@@ -93,6 +95,7 @@ td{padding:.5rem;border-bottom:1px solid var(--border)}
   <div id="loading-view"><div class="card"><p class="empty">Loading membership data...</p></div></div>
   <div id="lookup-view" class="hidden"></div>
   <div id="dashboard-view" class="hidden"></div>
+  <div id="licenses-view" class="hidden"></div>
   <div id="renewals-view" class="hidden"></div>
   <div id="cards-view" class="hidden"></div>
   <div id="settings-view" class="hidden"></div>
@@ -106,19 +109,19 @@ document.getElementById("hdr-logo").src = LOGO_IMG;
 
 // ===== CONFIG =====
 var CONFIG = {
-  proxyUrl: "https://script.google.com/macros/s/AKfycbwXLdb99SHdfAtEtA-PYv2qGelD1TbRaDQ7G9QXrFBIcz9LCouxHkVX7sN9ZRbg_88TZA/exec",
-  emailProxyUrl: "https://script.google.com/macros/s/AKfycbzwTmJwxmPFdCnvKtovw1Lp9p6iDbFtfpEhR8IN74cXrPypny3xHUNfS6TM04Q92vn9Hw/exec",
-  password: "cown2026"
+  proxyUrl: "https://script.google.com/macros/s/AKfycbyUg4ehImcsRcpgM8JzgFYqUx7g7Tgoe_FIz23Hh83MyTgoNNF6UDU8MxmgtIRQChagZQ/exec",
+  emailProxyUrl: "https://script.google.com/macros/s/AKfycbyUg4ehImcsRcpgM8JzgFYqUx7g7Tgoe_FIz23Hh83MyTgoNNF6UDU8MxmgtIRQChagZQ/exec"
 };
 
 // ===== STATE =====
 var S = {
-  view: "loading", members: [],
-  filterStatus: "all", adminUnlocked: false, pendingView: null
+  view: "loading", members: [], horses: [],
+  filterStatus: "all", adminUnlocked: false, pendingView: null, adminPwd: null
 };
 
 // ===== HELPERS =====
 function esc(s){ var t=String(s||""); return t.replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;"); }
+function currentYear(){ return new Date().getFullYear(); }
 
 function fmtDate(d){
   if(!d) return "—";
@@ -221,10 +224,17 @@ function parseMemberData(wb){
 function statusBadge(s){ return "<span class='badge badge-"+(s==="Active"?"active":"lapsed")+"'>"+s+"</span>"; }
 function typeBadge(t){ return "<span class='badge badge-"+(t==="Youth"?"active":t==="Collegiate"?"blue":"expiring")+"'>"+t+"</span>"; }
 
+// ===== HORSE LICENSE DATA =====
+function parseHorseJSON(data){
+  var raw = data.horses || [];
+  raw.forEach(function(h){ h.sentStatus = parseSentStatus(h.sentRaw || h.sentStatus || ""); });
+  return raw.sort(function(a,b){ return (a.owner||"").localeCompare(b.owner||"") || (a.horse||"").localeCompare(b.horse||""); });
+}
+
 // ===== TABS & VIEWS =====
 function renderTabs(){
   var tabs=[{id:"lookup",l:"Member Lookup"}];
-  if(S.adminUnlocked) tabs.push({id:"dashboard",l:"Dashboard"},{id:"renewals",l:"Renewals"},{id:"cards",l:"Cards"},{id:"settings",l:"Settings"});
+  if(S.adminUnlocked) tabs.push({id:"dashboard",l:"Dashboard"},{id:"renewals",l:"Renewals"},{id:"cards",l:"Cards"},{id:"licenses",l:"Horse Licenses"},{id:"settings",l:"Settings"});
   var h=tabs.map(function(t){ return "<button class='tab"+(S.view===t.id?" active":"")+"' data-view='"+t.id+"'>"+t.l+"</button>"; }).join("");
   if(!S.adminUnlocked) h+="<button class='tab' id='admin-unlock-btn' style='margin-left:auto;color:var(--muted)'>Admin</button>";
   document.getElementById("tabs").innerHTML=h;
@@ -236,10 +246,10 @@ function renderTabs(){
 }
 
 function showView(v){
-  var needsPwd=["dashboard","renewals","cards","settings"];
+  var needsPwd=["dashboard","renewals","cards","licenses","settings"];
   if(needsPwd.indexOf(v)>-1&&!S.adminUnlocked){ S.pendingView=v; document.getElementById("pwd-gate").classList.remove("hidden"); document.getElementById("pwd-input").focus(); return; }
   S.view=v;
-  ["loading","lookup","dashboard","renewals","cards","settings"].forEach(function(id){
+  ["loading","lookup","dashboard","renewals","cards","licenses","settings"].forEach(function(id){
     document.getElementById(id+"-view").classList.toggle("hidden",id!==v);
   });
   renderTabs();
@@ -247,17 +257,37 @@ function showView(v){
   if(v==="dashboard") renderDashboard();
   if(v==="renewals") renderRenewals();
   if(v==="cards") renderCards();
+  if(v==="licenses") renderLicenses();
   if(v==="settings") renderSettings();
 }
 
-// Password
+// Password — checked server-side so the real value never ships to the browser.
+// Only after it's verified does the full member/horse data (with emails, phone,
+// address) get fetched into the browser at all.
 document.getElementById("pwd-btn").addEventListener("click",function(){
-  if(document.getElementById("pwd-input").value===CONFIG.password){
-    S.adminUnlocked=true;
-    document.getElementById("pwd-gate").classList.add("hidden");
-    document.getElementById("pwd-input").value="";
-    showView(S.pendingView||"dashboard");
-  } else { alert("Wrong password"); }
+  var btn=this, pwd=document.getElementById("pwd-input").value;
+  if(!pwd) return;
+  var orig=btn.textContent; btn.textContent="Checking..."; btn.disabled=true;
+  fetch(CONFIG.emailProxyUrl+"?action=verifyPassword&pwd="+encodeURIComponent(pwd)+"&ts="+Date.now())
+    .then(function(r){ return r.json(); })
+    .then(function(data){
+      if(!data||!data.valid) throw new Error("WRONG_PASSWORD");
+      btn.textContent="Loading...";
+      return loadFullAdminData(pwd);
+    })
+    .then(function(){
+      S.adminPwd=pwd;
+      S.adminUnlocked=true;
+      document.getElementById("pwd-gate").classList.add("hidden");
+      document.getElementById("pwd-input").value="";
+      btn.textContent=orig; btn.disabled=false;
+      showView(S.pendingView||"dashboard");
+    })
+    .catch(function(e){
+      btn.textContent=orig; btn.disabled=false;
+      if(e&&e.message==="WRONG_PASSWORD") alert("Wrong password");
+      else alert("Could not load admin data: "+(e&&e.message?e.message:e));
+    });
 });
 document.getElementById("pwd-cancel").addEventListener("click",function(){
   document.getElementById("pwd-gate").classList.add("hidden");
@@ -268,7 +298,28 @@ document.getElementById("pwd-input").addEventListener("keydown",function(e){ if(
 // ===== LOOKUP =====
 function renderLookup(){
   var el=document.getElementById("lookup-view");
-  el.innerHTML="<div class='card'><div class='card-hdr'><h2>Member Lookup</h2><p>Search by name or CoWN number</p></div><div class='search-wrap'><span class='search-icon'>&#128269;</span><input class='search-box' id='lookup-q' placeholder='Enter name or CoWN #...'></div><div id='lookup-results'></div></div>";
+  el.innerHTML="<div class='card'><div class='card-hdr'><h2>Lookup</h2><p>Look up your membership, or your horse's license separately</p></div>"
+    +"<div class='pills' style='margin-bottom:.75rem'>"
+    +"<button class='pill active' data-lm='member'>Member Lookup</button>"
+    +"<button class='pill' data-lm='horse'>Horse License Lookup</button>"
+    +"</div>"
+    +"<div id='lookup-member'></div>"
+    +"<div id='lookup-horse' class='hidden'></div></div>";
+  renderMemberLookup();
+  renderHorseLookup();
+  el.querySelectorAll("[data-lm]").forEach(function(b){
+    b.addEventListener("click",function(){
+      el.querySelectorAll("[data-lm]").forEach(function(p){ p.classList.remove("active"); });
+      b.classList.add("active");
+      document.getElementById("lookup-member").classList.toggle("hidden",b.dataset.lm!=="member");
+      document.getElementById("lookup-horse").classList.toggle("hidden",b.dataset.lm!=="horse");
+    });
+  });
+}
+
+function renderMemberLookup(){
+  var el=document.getElementById("lookup-member");
+  el.innerHTML="<div class='search-wrap'><span class='search-icon'>&#128269;</span><input class='search-box' id='lookup-q' placeholder='Enter name or CoWN #...'></div><div id='lookup-results'></div>";
   document.getElementById("lookup-q").addEventListener("input",function(){
     var q=this.value.trim().toLowerCase();
     var res=document.getElementById("lookup-results");
@@ -282,6 +333,34 @@ function renderLookup(){
     t+="</tbody></table>";
     res.innerHTML=t;
     res.querySelectorAll(".lc-btn").forEach(function(b){ b.addEventListener("click",function(){ var num=parseInt(this.dataset.num); var mem=S.members.find(function(m){ return m.cownNum===num; }); if(mem) showCardModal(mem); }); });
+  });
+}
+
+function renderHorseLookup(){
+  var el=document.getElementById("lookup-horse");
+  el.innerHTML="<div class='search-wrap'><span class='search-icon'>&#128269;</span><input class='search-box' id='lookup-hq' placeholder='Enter horse, owner, rider, or year...'></div><div id='lookup-hresults'></div>";
+  document.getElementById("lookup-hq").addEventListener("input",function(){
+    var q=this.value.trim().toLowerCase();
+    var res=document.getElementById("lookup-hresults");
+    if(q.length<2){ res.innerHTML=""; return; }
+    var matches=S.horses.filter(function(h){
+      return (h.horse||"").toLowerCase().indexOf(q)>-1
+          ||(h.owner||"").toLowerCase().indexOf(q)>-1
+          ||(h.rider||"").toLowerCase().indexOf(q)>-1
+          ||String(h.horseNum||"").toLowerCase().indexOf(q)>-1
+          ||String(h.year||"").indexOf(q)>-1;
+    });
+    if(!matches.length){ res.innerHTML="<p class='empty'>No licenses found</p>"; return; }
+    var t="<table><thead><tr><th>Horse</th><th>Owner</th><th>Rider</th><th>Year</th><th></th></tr></thead><tbody>";
+    matches.slice(0,25).forEach(function(h){
+      var rd=h.rider||h.owner;
+      t+="<tr><td class='bold'>"+esc(h.horse)+"</td><td>"+esc(h.owner)+"</td><td>"+esc(rd)+"</td>"
+        +"<td class='ctr'><span class='badge badge-year'>"+h.year+"</span></td>"
+        +"<td><button class='btn btn-accent btn-sm vlb' data-idx='"+h.rowIndex+"'>View</button></td></tr>";
+    });
+    t+="</tbody></table>";
+    res.innerHTML=t;
+    res.querySelectorAll(".vlb").forEach(function(b){ b.addEventListener("click",function(){ var horse=S.horses.find(function(h){ return h.rowIndex===parseInt(this.dataset.idx); },this); if(horse) showLicenseModal(horse); }); });
   });
 }
 
@@ -458,7 +537,10 @@ function renderSettings(){
   h+="<strong style='color:var(--accent)'>Sent Column Values:</strong><br>";
   h+="<code style='color:#2ecc71'>send</code> — Queue to send card &nbsp;|&nbsp; <code style='color:var(--green)'>sent M/D/Y</code> — Already sent &nbsp;|&nbsp; <code style='color:var(--blue)'>renew</code> — Skip this member</div></div>";
   el.innerHTML=h;
-  document.getElementById("reload-btn").addEventListener("click",function(){ autoLoad(); });
+  document.getElementById("reload-btn").addEventListener("click",function(){
+    if(S.adminUnlocked&&S.adminPwd) loadFullAdminData(S.adminPwd).then(function(){ showView(S.view); });
+    else autoLoad();
+  });
   document.getElementById("file-upload").addEventListener("change",function(e){
     var file=e.target.files[0]; if(!file) return;
     var reader=new FileReader();
@@ -561,6 +643,166 @@ function showDetailModal(m){
   });
 }
 
+// ===== HORSE LICENSES (admin) =====
+function buildLicenseHTML(h){
+  var rd=h.rider||h.owner;
+  return "<div class='license-card' style='border:2px solid #D4A04A;border-radius:10px;padding:1.25rem 1.5rem;background:#fff;max-width:480px;margin:0 auto;font-family:Source Sans 3,sans-serif;box-shadow:0 2px 10px rgba(0,0,0,.12)'>"
+    +"<div style='display:flex;align-items:center;justify-content:space-between;border-bottom:2px solid #D4A04A;padding-bottom:.75rem;margin-bottom:.75rem'>"
+    +"<img src='"+LOGO_IMG+"' alt='CoWN' style='height:42px;border-radius:4px'>"
+    +"<div style='text-align:right'><div style='font-family:Oswald,sans-serif;font-size:1.1rem;font-weight:700;color:#1a1a2e;letter-spacing:.04em'>HORSE LICENSE</div>"
+    +"<div style='font-size:.85rem;color:#888;margin-top:2px'>CoWN Stock Horse Association</div></div></div>"
+    +"<div style='display:grid;grid-template-columns:1fr 1fr;gap:.6rem .5rem;font-size:.9rem'>"
+    +"<div><div style='font-size:.7rem;color:#999;text-transform:uppercase;letter-spacing:.05em'>Horse</div><div style='font-weight:700;font-size:1rem;color:#1a1a2e'>"+esc(h.horse)+"</div></div>"
+    +"<div><div style='font-size:.7rem;color:#999;text-transform:uppercase;letter-spacing:.05em'>Year</div><div style='font-weight:700;font-size:1rem;color:#D4A04A'>"+h.year+"</div></div>"
+    +"<div><div style='font-size:.7rem;color:#999;text-transform:uppercase;letter-spacing:.05em'>Owner</div><div style='font-weight:600;color:#1a1a2e'>"+esc(h.owner)+(h.ownerCownNum?"<span style='font-size:.75rem;color:#aaa;margin-left:6px'>CoWN #"+esc(h.ownerCownNum)+"</span>":"")+"</div></div>"
+    +"<div><div style='font-size:.7rem;color:#999;text-transform:uppercase;letter-spacing:.05em'>Horse #</div><div style='font-weight:600;color:#1a1a2e'>"+(h.horseNum||"—")+"</div></div>"
+    +(rd!==h.owner?"<div style='grid-column:1/-1'><div style='font-size:.7rem;color:#999;text-transform:uppercase;letter-spacing:.05em'>Rider</div><div style='font-weight:600;color:#1a1a2e'>"+esc(rd)+(h.riderCownNum?"<span style='font-size:.75rem;color:#aaa;margin-left:6px'>CoWN #"+esc(h.riderCownNum)+"</span>":"")+"</div></div>":"")
+    +(h.licNum?"<div style='grid-column:1/-1'><div style='font-size:.7rem;color:#999;text-transform:uppercase;letter-spacing:.05em'>License #</div><div style='font-weight:600;color:#1a1a2e;font-family:monospace'>"+esc(h.licNum)+"</div></div>":"")
+    +"</div>"
+    +"<div style='border-top:1px solid #e8e0d0;margin-top:.75rem;padding-top:.6rem;font-size:.7rem;color:#aaa;display:flex;justify-content:space-between'>"
+    +"<span>Colorado, Wyoming &amp; Nebraska Stock Horse Association</span><span>www.cownsh.com</span></div></div>";
+}
+
+function printLicense(h){
+  var win=window.open("","","width=600,height=700");
+  win.document.write("<!DOCTYPE html><html><head><link href='https://fonts.googleapis.com/css2?family=Oswald:wght@400;600;700&family=Source+Sans+3:wght@400;600&display=swap' rel='stylesheet'><style>body{font-family:Source Sans 3,sans-serif;padding:2rem;background:#fff}@media print{.license-card{-webkit-print-color-adjust:exact;print-color-adjust:exact}}</style></head><body>");
+  win.document.write(buildLicenseHTML(h));
+  win.document.write("</body></html>"); win.document.close();
+  setTimeout(function(){ win.print(); },500);
+}
+
+function showLicenseModal(h){
+  var root=document.getElementById("modal-root");
+  var html="<div class='modal-overlay' id='lic-modal'><div class='modal'>";
+  html+=buildLicenseHTML(h);
+  html+="<div class='btn-row' style='margin-top:1rem'><button class='btn btn-dark' id='lic-close'>Close</button>";
+  html+=" <button class='btn btn-accent' id='lic-print'>&#128424; Print</button>";
+  if(S.adminUnlocked&&h.riderEmail) html+=" <button class='btn btn-green' id='lic-email' data-idx='"+h.rowIndex+"'>&#9993; Send</button>";
+  if(S.adminUnlocked&&!h.riderEmail) html+=" <span style='font-size:.75rem;color:var(--red)'>No email found</span>";
+  html+="</div></div></div>";
+  root.innerHTML=html;
+  document.getElementById("lic-close").addEventListener("click",function(){ root.innerHTML=""; });
+  document.getElementById("lic-modal").addEventListener("click",function(e){ if(e.target===this) root.innerHTML=""; });
+  document.getElementById("lic-print").addEventListener("click",function(){ printLicense(h); });
+  var eb=document.getElementById("lic-email");
+  if(eb) eb.addEventListener("click",function(){ sendLicenseEmail(parseInt(this.dataset.idx),this); });
+}
+
+function renderLicenses(){
+  var el=document.getElementById("licenses-view");
+  var queued=S.horses.filter(function(h){ return h.sentStatus==="send"; });
+  var sent=S.horses.filter(function(h){ return h.sentStatus==="sent"; });
+  var blank=S.horses.filter(function(h){ return h.sentStatus===""; });
+  var h="<div class='card'><div class='card-hdr'><h2>Horse Licenses</h2>"
+    +"<p>Type <strong>send</strong> in the sheet's Emailed column to queue. Date is written back automatically after sending.</p></div>";
+  h+="<div class='stats' style='margin-bottom:1rem'>";
+  h+="<div class='stat active-stat'><div class='num'>"+queued.length+"</div><div class='lbl'>Queued</div></div>";
+  h+="<div class='stat warn-stat'><div class='num'>"+blank.length+"</div><div class='lbl'>No Action</div></div>";
+  h+="<div class='stat total-stat'><div class='num'>"+sent.length+"</div><div class='lbl'>Sent</div></div>";
+  h+="</div>";
+  h+="<div class='btn-row' style='margin-bottom:1rem'>";
+  h+="<button class='btn btn-accent' id='lic-batch-print'>&#128424; Print All</button>";
+  if(queued.length>0) h+="<button class='btn btn-green' id='lic-batch-send'>&#9993; Send "+queued.length+" Queued</button>";
+  h+="</div>";
+  h+="<div class='search-wrap'><span class='search-icon'>&#128269;</span><input class='search-box' id='lic-q' placeholder='Search...'></div>";
+  h+="<div class='pills' style='margin-bottom:.75rem'>";
+  h+="<button class='pill active' data-lf='all'>All ("+S.horses.length+")</button>";
+  h+="<button class='pill' data-lf='send'>Queued ("+queued.length+")</button>";
+  h+="<button class='pill' data-lf='sent'>Sent ("+sent.length+")</button>";
+  h+="<button class='pill' data-lf=''>No Action ("+blank.length+")</button>";
+  h+="</div><div id='lic-results'></div></div>";
+  el.innerHTML=h;
+  var licFilter="all";
+  function renderLicList(q){
+    var list=S.horses;
+    if(licFilter!=="all") list=S.horses.filter(function(h){ return h.sentStatus===licFilter; });
+    if(q) list=list.filter(function(h){ return (h.horse||"").toLowerCase().indexOf(q)>-1||(h.owner||"").toLowerCase().indexOf(q)>-1||(h.rider||"").toLowerCase().indexOf(q)>-1||String(h.year||"").indexOf(q)>-1; });
+    var res=document.getElementById("lic-results");
+    if(!list.length){ res.innerHTML="<p class='empty'>No licenses match</p>"; return; }
+    var t="<div style='overflow-x:auto'><table><thead><tr><th>Horse</th><th>Owner</th><th>Rider</th><th>Year</th><th>Send To</th><th>Sent</th><th></th></tr></thead><tbody>";
+    list.slice(0,60).forEach(function(h){
+      var rd=h.rider||h.owner;
+      var emailCell=h.riderEmail
+        ?"<span class='email-chip' title='"+esc(h.riderEmail)+"'>"+esc(h.riderEmail)+"</span>"
+        :"<span style='font-size:.75rem;color:var(--red)'>No email</span>";
+      t+="<tr><td class='bold'>"+esc(h.horse)+"</td><td>"+esc(h.owner)+"</td><td>"+esc(rd)+"</td>"
+        +"<td class='ctr'><span class='badge badge-year'>"+h.year+"</span></td>"
+        +"<td>"+emailCell+"</td>"
+        +"<td class='ctr'>"+sentBadge(h)+"</td>"
+        +"<td style='white-space:nowrap'>"
+        +"<button class='btn btn-dark btn-sm vlb' data-idx='"+h.rowIndex+"' style='margin-right:3px'>View</button>"
+        +(h.riderEmail?" <button class='btn btn-green btn-sm slb' data-idx='"+h.rowIndex+"'>&#9993; Send</button>":"")
+        +"</td></tr>";
+    });
+    t+="</tbody></table></div>";
+    res.innerHTML=t;
+    res.querySelectorAll(".vlb").forEach(function(b){ b.addEventListener("click",function(){ var horse=S.horses.find(function(h){ return h.rowIndex===parseInt(this.dataset.idx); },this); if(horse) showLicenseModal(horse); }); });
+    res.querySelectorAll(".slb").forEach(function(b){ b.addEventListener("click",function(){ sendLicenseEmail(parseInt(this.dataset.idx),this); }); });
+  }
+  renderLicList("");
+  document.getElementById("lic-q").addEventListener("input",function(){ renderLicList(this.value.trim().toLowerCase()); });
+  el.querySelectorAll("[data-lf]").forEach(function(b){
+    b.addEventListener("click",function(){
+      licFilter=b.dataset.lf;
+      el.querySelectorAll("[data-lf]").forEach(function(p){ p.classList.remove("active"); });
+      b.classList.add("active");
+      renderLicList((document.getElementById("lic-q")||{value:""}).value.trim().toLowerCase());
+    });
+  });
+  document.getElementById("lic-batch-print").addEventListener("click",function(){
+    var win=window.open("","","width=600,height=800");
+    win.document.write("<!DOCTYPE html><html><head><link href='https://fonts.googleapis.com/css2?family=Oswald:wght@400;600;700&family=Source+Sans+3:wght@400;600&display=swap' rel='stylesheet'><style>body{font-family:Source Sans 3,sans-serif;padding:1rem;background:#fff}@media print{.lp{page-break-after:always}}.lp{max-width:540px;margin:0 auto 2rem;padding:1.5rem}</style></head><body>");
+    S.horses.forEach(function(h){ win.document.write("<div class='lp'>"+buildLicenseHTML(h)+"</div>"); });
+    win.document.write("</body></html>"); win.document.close();
+    setTimeout(function(){ win.print(); },500);
+  });
+  var bb=document.getElementById("lic-batch-send");
+  if(bb){ bb.addEventListener("click",function(){
+    var q2=S.horses.filter(function(h){ return h.sentStatus==="send"; });
+    if(!q2.length){ alert("No licenses queued."); return; }
+    if(!confirm("Send to "+q2.length+" queued?")) return;
+    sendBatchLicenses(q2.map(function(h){ return h.rowIndex; }),this);
+  }); }
+}
+
+function sendLicenseEmail(rowIdx,btn){
+  var horse=S.horses.find(function(h){ return h.rowIndex===rowIdx; });
+  if(!horse){ alert("License not found"); return; }
+  if(!horse.riderEmail){ alert("No email address found for this rider."); return; }
+  var orig=btn.textContent; btn.textContent="Sending..."; btn.disabled=true;
+  fetch(CONFIG.emailProxyUrl+"?action=sendLicense&rowIdx="+rowIdx+"&ts="+Date.now())
+    .then(function(r){ return r.json(); })
+    .then(function(data){
+      if(data.success){ btn.textContent="Sent!"; btn.classList.add("btn-green"); horse.sentStatus="sent"; horse.sentRaw="sent";
+        setTimeout(function(){ btn.textContent=orig; btn.disabled=false; btn.classList.remove("btn-green"); },3000);
+      } else { btn.textContent="Failed"; alert("Error: "+(data.error||"Unknown")); setTimeout(function(){ btn.textContent=orig; btn.disabled=false; },2000); }
+    })
+    .catch(function(e){ btn.textContent="Error"; alert("Network error: "+e.message); setTimeout(function(){ btn.textContent=orig; btn.disabled=false; },2000); });
+}
+function sendBatchLicenses(rowIdxs,btn){
+  var orig=btn.textContent, total=rowIdxs.length, sent=0, failed=0, failedNames=[];
+  btn.disabled=true;
+  function sendNext(i){
+    if(i>=total){
+      btn.textContent="Done! Sent "+sent+"/"+total;
+      if(failed>0) alert(failed+" failed:\n"+failedNames.join("\n"));
+      setTimeout(function(){ btn.textContent=orig; btn.disabled=false; },4000); return;
+    }
+    var idx=rowIdxs[i];
+    var horse=S.horses.find(function(h){ return h.rowIndex===idx; });
+    btn.textContent="Sending "+(i+1)+"/"+total+(horse?" — "+horse.horse:"")+"...";
+    fetch(CONFIG.emailProxyUrl+"?action=sendLicense&rowIdx="+idx+"&ts="+Date.now())
+      .then(function(r){ return r.json(); })
+      .then(function(data){
+        if(data.success){ sent++; if(horse){ horse.sentStatus="sent"; horse.sentRaw="sent"; } }
+        else { failed++; failedNames.push((horse?horse.horse:"#"+idx)+": "+(data.error||"error")); }
+        setTimeout(function(){ sendNext(i+1); },800);
+      })
+      .catch(function(e){ failed++; failedNames.push((horse?horse.horse:"#"+idx)+": network error"); setTimeout(function(){ sendNext(i+1); },800); });
+  }
+  sendNext(0);
+}
+
 // ===== EMAIL FUNCTIONS (GET-based) =====
 function sendCardEmail(cownNum, btn){
   var mem=S.members.find(function(m){ return m.cownNum===cownNum; });
@@ -626,9 +868,38 @@ function sendBatchEmails(cownNums, btn){
 }
 
 // ===== LOAD =====
-function autoLoad(){
-  showView("loading");
-  fetch(CONFIG.proxyUrl+"?type=membership&ts="+Date.now())
+// Public load (no password): name/CoWN#/type/status/expiration for members,
+// horse/owner/rider/year for licenses. No emails, phone, or address ship to
+// the browser until an admin password has been verified server-side.
+function parsePublicMembers(data){
+  var raw=(data&&data.members)||[];
+  return raw.map(function(m){
+    return {
+      first:m.first||"", last:m.last||"", fullName:m.fullName||((m.first||"")+" "+(m.last||"")),
+      cownNum:parseInt(m.cownNum)||0, type:m.type||"General", status:m.status||"Lapsed",
+      duration:1, renewDate:null, expDate:m.expDate||null, daysToExp:null, expiring:false,
+      email:"", phone:"", address:"", city:"", state:"", zip:"",
+      sentStatus:"", sentRaw:"", youthDOB:"", age:"", l1Status:"", method:""
+    };
+  }).sort(function(a,b){ return a.last.localeCompare(b.last)||a.first.localeCompare(b.first); });
+}
+function parsePublicHorses(data){
+  var raw=(data&&data.horses)||[];
+  raw.forEach(function(h){ h.ownerEmail=""; h.riderEmail=""; h.sentStatus=""; h.sentRaw=""; });
+  return raw.sort(function(a,b){ return (a.owner||"").localeCompare(b.owner||"")||(a.horse||"").localeCompare(b.horse||""); });
+}
+
+function loadHorses(){
+  fetch(CONFIG.emailProxyUrl+"?type=horseDirectory&ts="+Date.now())
+    .then(function(r){ if(!r.ok) throw new Error("HTTP "+r.status); return r.json(); })
+    .then(function(data){ S.horses=parsePublicHorses(data); })
+    .catch(function(e){ console.error("Horse license load error:",e); });
+}
+
+// Full load (password required): fetches the real spreadsheet + emails, only
+// called after ?action=verifyPassword confirms the password server-side.
+function loadFullAdminData(pwd){
+  var memberFetch=fetch(CONFIG.proxyUrl+"?type=membership&pwd="+encodeURIComponent(pwd)+"&ts="+Date.now())
     .then(function(r){ if(!r.ok) throw new Error("HTTP "+r.status); return r.text(); })
     .then(function(b64){
       var bin=atob(b64);
@@ -636,6 +907,20 @@ function autoLoad(){
       for(var i=0;i<bin.length;i++) arr[i]=bin.charCodeAt(i);
       var wb=XLSX.read(arr,{type:"array"});
       S.members=parseMemberData(wb);
+    });
+  var horseFetch=fetch(CONFIG.emailProxyUrl+"?type=horse&pwd="+encodeURIComponent(pwd)+"&ts="+Date.now())
+    .then(function(r){ if(!r.ok) throw new Error("HTTP "+r.status); return r.json(); })
+    .then(function(data){ if(!data||data.error) throw new Error((data&&data.error)||"Unauthorized"); S.horses=parseHorseJSON(data); });
+  return Promise.all([memberFetch,horseFetch]);
+}
+
+function autoLoad(){
+  showView("loading");
+  loadHorses();
+  fetch(CONFIG.proxyUrl+"?type=memberDirectory&ts="+Date.now())
+    .then(function(r){ if(!r.ok) throw new Error("HTTP "+r.status); return r.json(); })
+    .then(function(data){
+      S.members=parsePublicMembers(data);
       showView("lookup");
     })
     .catch(function(e){
